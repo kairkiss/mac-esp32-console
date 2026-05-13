@@ -1,0 +1,336 @@
+[
+  {
+    "id": "bkb_tab_v5",
+    "type": "tab",
+    "label": "BKB Desk Node v5",
+    "disabled": false,
+    "info": "Stable daily-use Mac face. Locked/off; unlocked state-driven face; app overlay with cooldown; night policy."
+  },
+  {
+    "id": "bkb_mqtt_broker_v5",
+    "type": "mqtt-broker",
+    "name": "BKB-MQTT",
+    "broker": "127.0.0.1",
+    "port": "1883",
+    "clientid": "",
+    "autoConnect": true,
+    "usetls": false,
+    "protocolVersion": "4",
+    "keepalive": "60",
+    "cleansession": true,
+    "birthTopic": "",
+    "birthQos": "0",
+    "birthRetain": "false",
+    "birthPayload": "",
+    "birthMsg": {},
+    "closeTopic": "",
+    "closeQos": "0",
+    "closeRetain": "false",
+    "closePayload": "",
+    "closeMsg": {},
+    "willTopic": "",
+    "willQos": "0",
+    "willRetain": "false",
+    "willPayload": "",
+    "willMsg": {},
+    "sessionExpiry": ""
+  },
+  {
+    "id": "bkb_init_v5",
+    "type": "inject",
+    "z": "bkb_tab_v5",
+    "name": "初始化：默认锁屏熄灭",
+    "props": [
+      {
+        "p": "bkb_event",
+        "v": "init",
+        "vt": "str"
+      }
+    ],
+    "repeat": "",
+    "crontab": "",
+    "once": true,
+    "onceDelay": "1",
+    "topic": "",
+    "x": 170,
+    "y": 80,
+    "wires": [
+      [
+        "bkb_controller_v5"
+      ]
+    ]
+  },
+  {
+    "id": "bkb_tick_v5",
+    "type": "inject",
+    "z": "bkb_tab_v5",
+    "name": "1秒主时钟",
+    "props": [
+      {
+        "p": "bkb_event",
+        "v": "tick",
+        "vt": "str"
+      }
+    ],
+    "repeat": "1",
+    "crontab": "",
+    "once": true,
+    "onceDelay": "2",
+    "topic": "",
+    "x": 140,
+    "y": 140,
+    "wires": [
+      [
+        "bkb_controller_v5"
+      ]
+    ]
+  },
+  {
+    "id": "bkb_http_in_v5",
+    "type": "http in",
+    "z": "bkb_tab_v5",
+    "name": "Hammerspoon 锁屏/App",
+    "url": "/bkb/mac/event",
+    "method": "post",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 170,
+    "y": 220,
+    "wires": [
+      [
+        "bkb_controller_v5"
+      ]
+    ]
+  },
+  {
+    "id": "bkb_btn1_v5",
+    "type": "mqtt in",
+    "z": "bkb_tab_v5",
+    "name": "按钮1：睡眠/互动",
+    "topic": "bkb/desk1/event/button/1",
+    "qos": "0",
+    "datatype": "auto",
+    "broker": "bkb_mqtt_broker_v5",
+    "nl": false,
+    "rap": true,
+    "rh": 0,
+    "inputs": 0,
+    "x": 160,
+    "y": 310,
+    "wires": [
+      [
+        "bkb_controller_v5"
+      ]
+    ]
+  },
+  {
+    "id": "bkb_btn2_v5",
+    "type": "mqtt in",
+    "z": "bkb_tab_v5",
+    "name": "按钮2：状态页",
+    "topic": "bkb/desk1/event/button/2",
+    "qos": "0",
+    "datatype": "auto",
+    "broker": "bkb_mqtt_broker_v5",
+    "nl": false,
+    "rap": true,
+    "rh": 0,
+    "inputs": 0,
+    "x": 140,
+    "y": 370,
+    "wires": [
+      [
+        "bkb_controller_v5"
+      ]
+    ]
+  },
+  {
+    "id": "bkb_controller_v5",
+    "type": "function",
+    "z": "bkb_tab_v5",
+    "name": "BKB 状态机 v5",
+    "func": "// BKB Desk Node v5 Controller\nconst BUTTON_OVERLAY_MS = 10 * 1000;\nconst APP_OVERLAY_MS = 2 * 1000;\nconst APP_COOLDOWN_MS = 8 * 1000;\nconst STATUS_INTERVAL_MS = 3000;\nconst FACE_REFRESH_MS = 2500;\nconst NIGHT_START_HOUR = 23;\nconst NIGHT_END_HOUR = 8;\nconst NIGHT_IDLE_OFF_SEC = 60;\nconst now = Date.now();\n\nfunction mqtt(topic, payload, retain = true) { return { topic, payload: JSON.stringify(payload), retain, qos: 0 }; }\nfunction screenOn() { return mqtt(\"bkb/desk1/desired/system\", { screen: \"on\" }, true); }\nfunction screenOff() { return mqtt(\"bkb/desk1/desired/system\", { screen: \"off\" }, true); }\nfunction face(mood, intensity = 20, variant = \"normal\") { return mqtt(\"bkb/desk1/desired/face\", { mood, intensity, variant }, true); }\nfunction display(l0, l1, l2, l3) { return mqtt(\"bkb/desk1/desired/display\", { l0:String(l0||\"\").substring(0,16), l1:String(l1||\"\").substring(0,16), l2:String(l2||\"\").substring(0,16), l3:String(l3||\"\").substring(0,16) }, true); }\nfunction httpOk(text = \"OK\") { return { statusCode:200, headers:{\"content-type\":\"text/plain\"}, payload:text }; }\nfunction setOverlay(type, ms, data = {}) { flow.set(\"bkb_overlay\", type); flow.set(\"bkb_overlay_until\", now + ms); flow.set(\"bkb_overlay_data\", data); }\nfunction clearOverlay() { flow.set(\"bkb_overlay\", \"\"); flow.set(\"bkb_overlay_until\", 0); flow.set(\"bkb_overlay_data\", {}); }\nfunction isLocked() { return flow.get(\"bkb_locked\") === true; }\nfunction rememberStatus(s) { flow.set(\"bkb_last_status\", s || {}); }\nfunction getLastStatus() { return flow.get(\"bkb_last_status\") || {}; }\nfunction clamp(n, lo, hi) { n = Number(n || 0); return Math.max(lo, Math.min(hi, n)); }\nfunction hourFromStatus(s) { const m = String(s.time || \"\").match(/^(\\d{1,2}):/); return m ? Number(m[1]) : new Date().getHours(); }\nfunction isNight(s) { const h = hourFromStatus(s); return h >= NIGHT_START_HOUR || h < NIGHT_END_HOUR; }\nfunction appClass(app) {\n  const a = String(app || \"\").toLowerCase();\n  if (a.includes(\"terminal\") || a.includes(\"code\") || a.includes(\"xcode\") || a.includes(\"arduino\") || a.includes(\"node-red\")) return \"dev\";\n  if (a.includes(\"music\") || a.includes(\"spotify\") || a.includes(\"tv\")) return \"media\";\n  if (a.includes(\"safari\") || a.includes(\"chrome\") || a.includes(\"edge\") || a.includes(\"firefox\")) return \"browser\";\n  return \"normal\";\n}\nfunction decideMood(s) {\n  const cpu = clamp(s.cpu,0,100), mem = clamp(s.mem,0,100), idle = Number(s.idle || 0), app = String(s.app || \"\");\n  let mood = \"happy\", intensity = Math.max(cpu, Math.floor(mem * 0.65)), variant = \"normal\";\n  if (idle >= 180) { mood = \"idle\"; intensity = Math.min(40, intensity); }\n  if (cpu >= 85 || mem >= 90) { mood = \"power\"; intensity = Math.max(cpu, mem); }\n  else if (cpu >= 65 || mem >= 78) { mood = \"busy\"; intensity = Math.max(cpu, mem); }\n  else if (cpu >= 35) { mood = \"focus\"; intensity = cpu; }\n  else if (idle < 180) { mood = \"happy\"; intensity = cpu; }\n  const cls = appClass(app);\n  if (mood === \"happy\" || mood === \"idle\") {\n    if (cls === \"dev\") { mood = \"focus\"; intensity = Math.max(intensity, 42); }\n    else if (cls === \"media\") { mood = \"happy\"; variant = \"soft\"; }\n  }\n  if (isNight(s) && idle >= NIGHT_IDLE_OFF_SEC) { mood = \"sleep\"; intensity = 10; variant = \"night\"; }\n  return {mood, intensity, variant};\n}\nfunction statusPage(s, label=\"SYS STATUS\") {\n  const cpu = Number(s.cpu ?? 0), mem = Number(s.mem ?? 0), time = String(s.time ?? \"--:--\"), idle = Number(s.idle ?? 0);\n  let mode = isLocked() ? \"LOCKED\" : \"ACTIVE\";\n  if (!isLocked() && idle >= 180) mode = \"IDLE\";\n  if (!isLocked() && isNight(s)) mode = \"NIGHT\";\n  return display(label, (`CPU ${cpu}% MEM ${mem}%`).substring(0,16), (`${time} ${mode}`).substring(0,16), (`IDLE ${idle}s`).substring(0,16));\n}\nfunction activeFaceMessages(s) {\n  const d = decideMood(s), idle = Number(s.idle || 0);\n  if (isNight(s) && idle >= NIGHT_IDLE_OFF_SEC) { node.status({fill:\"grey\",shape:\"dot\",text:\"night idle off\"}); return [screenOff()]; }\n  const lastMood = flow.get(\"bkb_last_mood\") || \"\", lastIntensity = Number(flow.get(\"bkb_last_intensity\") || -1), lastVariant = flow.get(\"bkb_last_variant\") || \"\", lastFaceMs = Number(flow.get(\"bkb_last_face_ms\") || 0);\n  const bucket = Math.floor(d.intensity / 10), lastBucket = Math.floor(lastIntensity / 10);\n  if (d.mood !== lastMood || d.variant !== lastVariant || bucket !== lastBucket || now - lastFaceMs >= FACE_REFRESH_MS) {\n    flow.set(\"bkb_last_mood\", d.mood); flow.set(\"bkb_last_intensity\", d.intensity); flow.set(\"bkb_last_variant\", d.variant); flow.set(\"bkb_last_face_ms\", now);\n    node.status({fill:\"green\",shape:\"dot\",text:`${d.mood} ${d.intensity}%`});\n    return [screenOn(), face(d.mood, d.intensity, d.variant)];\n  }\n  return [];\n}\nfunction goLocked() { flow.set(\"bkb_locked\", true); clearOverlay(); node.status({fill:\"grey\",shape:\"dot\",text:\"locked/off\"}); return [[screenOff()], null, null]; }\nfunction goUnlocked() { flow.set(\"bkb_locked\", false); clearOverlay(); flow.set(\"bkb_last_face_ms\",0); node.status({fill:\"green\",shape:\"dot\",text:\"unlocked\"}); return [[screenOn(), face(\"happy\",20,\"normal\")], {payload:\"refresh\"}, null]; }\nfunction parsePayload(x) { if(!x) return {}; if(typeof x === \"object\") return x; try { return JSON.parse(x); } catch(e) { return {}; } }\n\nconst ev = msg.bkb_event || \"\", topic = msg.topic || \"\", payload = parsePayload(msg.payload);\nif (ev === \"init\") { flow.set(\"bkb_locked\", true); clearOverlay(); node.status({fill:\"grey\",shape:\"dot\",text:\"init locked/off\"}); return [[screenOff()], null, null]; }\nif (msg.req && msg.req.url === \"/bkb/mac/event\") {\n  const e = payload.event || payload.bkb_event || \"\";\n  if (e === \"locked\") { const r = goLocked(); r[2] = httpOk(\"LOCKED\"); return r; }\n  if (e === \"unlocked\") { const r = goUnlocked(); r[2] = httpOk(\"UNLOCKED\"); return r; }\n  if (e === \"app\") {\n    if (isLocked()) return [null,null,httpOk(\"LOCKED_IGNORE_APP\")];\n    const app = String(payload.app || \"App\"), last = Number(flow.get(\"bkb_last_app_overlay_ms\") || 0), overlay = flow.get(\"bkb_overlay\") || \"\";\n    if (overlay && overlay !== \"app\") return [null,null,httpOk(\"BUSY_IGNORE_APP\")];\n    if (now - last < APP_COOLDOWN_MS) return [null,null,httpOk(\"COOLDOWN_IGNORE_APP\")];\n    flow.set(\"bkb_last_app_overlay_ms\", now); setOverlay(\"app\", APP_OVERLAY_MS, {app}); node.status({fill:\"purple\",shape:\"dot\",text:`app ${app}`});\n    return [[screenOn(), display(\"Now using\", app, \"\", \"\")], null, httpOk(\"APP\")];\n  }\n  return [null,null,httpOk(\"IGNORED\")];\n}\nif (topic === \"bkb/desk1/event/button/1\") {\n  if (isLocked()) { setOverlay(\"sleep_peek\", BUTTON_OVERLAY_MS, {}); node.status({fill:\"yellow\",shape:\"dot\",text:\"sleep peek\"}); return [[screenOn(), face(\"sleep\",10,\"peek\")], null, null]; }\n  setOverlay(\"play\", BUTTON_OVERLAY_MS, {}); node.status({fill:\"yellow\",shape:\"dot\",text:\"play\"}); return [[screenOn(), face(\"play\",15,\"play\")], null, null];\n}\nif (topic === \"bkb/desk1/event/button/2\") { setOverlay(\"status\", BUTTON_OVERLAY_MS, {}); node.status({fill:\"blue\",shape:\"dot\",text:\"status\"}); const s = getLastStatus(); return [[screenOn(), statusPage(s, isLocked()?\"LOCKED STATUS\":\"SYS STATUS\")], {payload:\"refresh\"}, null]; }\nif (ev === \"status\") {\n  const s = payload || {}; rememberStatus(s);\n  const overlay = flow.get(\"bkb_overlay\") || \"\", until = Number(flow.get(\"bkb_overlay_until\") || 0), data = flow.get(\"bkb_overlay_data\") || {};\n  if (overlay && until && now >= until) { clearOverlay(); if (isLocked()) return [[screenOff()], null, null]; flow.set(\"bkb_last_face_ms\",0); return [activeFaceMessages(s), null, null]; }\n  if (isLocked()) { if (overlay === \"status\") return [[screenOn(), statusPage(s,\"LOCKED STATUS\")], null, null]; return [null,null,null]; }\n  if (overlay === \"status\") return [[screenOn(), statusPage(s,\"SYS STATUS\")], null, null];\n  if (overlay === \"app\") return [[screenOn(), display(\"Now using\", String(data.app || \"App\"), \"\", \"\")], null, null];\n  if (overlay === \"play\" || overlay === \"sleep_peek\") return [null,null,null];\n  return [activeFaceMessages(s), null, null];\n}\nif (ev === \"tick\") { const last = Number(flow.get(\"bkb_last_status_ms\") || 0); if (now - last >= STATUS_INTERVAL_MS) { flow.set(\"bkb_last_status_ms\", now); return [null, {payload:\"refresh\"}, null]; } }\nreturn [null,null,null];\n",
+    "outputs": 3,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 650,
+    "y": 220,
+    "wires": [
+      [
+        "bkb_mqtt_out_v5"
+      ],
+      [
+        "bkb_status_exec_v5"
+      ],
+      [
+        "bkb_http_resp_v5"
+      ]
+    ]
+  },
+  {
+    "id": "bkb_mqtt_out_v5",
+    "type": "mqtt out",
+    "z": "bkb_tab_v5",
+    "name": "发布 desired/*",
+    "topic": "",
+    "qos": "",
+    "retain": "",
+    "respTopic": "",
+    "contentType": "",
+    "userProps": "",
+    "correl": "",
+    "expiry": "",
+    "broker": "bkb_mqtt_broker_v5",
+    "x": 950,
+    "y": 120,
+    "wires": []
+  },
+  {
+    "id": "bkb_status_exec_v5",
+    "type": "exec",
+    "z": "bkb_tab_v5",
+    "command": "/Users/YOUR_MAC_USERNAME/bin/macbrain_status.sh",
+    "addpay": "",
+    "append": "",
+    "useSpawn": "false",
+    "timer": "",
+    "winHide": false,
+    "oldrc": false,
+    "name": "采集 Mac 状态",
+    "x": 930,
+    "y": 260,
+    "wires": [
+      [
+        "bkb_status_json_v5"
+      ],
+      [
+        "bkb_exec_err_v5"
+      ],
+      [
+        "bkb_exec_rc_v5"
+      ]
+    ]
+  },
+  {
+    "id": "bkb_status_json_v5",
+    "type": "json",
+    "z": "bkb_tab_v5",
+    "name": "解析状态 JSON",
+    "property": "payload",
+    "action": "",
+    "pretty": false,
+    "x": 1160,
+    "y": 220,
+    "wires": [
+      [
+        "bkb_status_mark_v5"
+      ]
+    ]
+  },
+  {
+    "id": "bkb_status_mark_v5",
+    "type": "function",
+    "z": "bkb_tab_v5",
+    "name": "标记 status 事件",
+    "func": "msg.bkb_event = \"status\";\nreturn msg;",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 1360,
+    "y": 220,
+    "wires": [
+      [
+        "bkb_controller_v5"
+      ]
+    ]
+  },
+  {
+    "id": "bkb_http_resp_v5",
+    "type": "http response",
+    "z": "bkb_tab_v5",
+    "name": "HTTP OK",
+    "statusCode": "",
+    "headers": {},
+    "x": 930,
+    "y": 340,
+    "wires": []
+  },
+  {
+    "id": "bkb_exec_err_v5",
+    "type": "debug",
+    "z": "bkb_tab_v5",
+    "name": "状态脚本 stderr",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "payload",
+    "targetType": "msg",
+    "statusVal": "",
+    "statusType": "auto",
+    "x": 1150,
+    "y": 300,
+    "wires": []
+  },
+  {
+    "id": "bkb_exec_rc_v5",
+    "type": "debug",
+    "z": "bkb_tab_v5",
+    "name": "状态脚本 rc",
+    "active": false,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "payload",
+    "targetType": "msg",
+    "statusVal": "",
+    "statusType": "auto",
+    "x": 1140,
+    "y": 350,
+    "wires": []
+  },
+  {
+    "id": "bkb_online_in_v5",
+    "type": "mqtt in",
+    "z": "bkb_tab_v5",
+    "name": "ESP32 online/offline",
+    "topic": "bkb/desk1/state/online",
+    "qos": "0",
+    "datatype": "auto",
+    "broker": "bkb_mqtt_broker_v5",
+    "nl": false,
+    "rap": true,
+    "rh": 0,
+    "inputs": 0,
+    "x": 160,
+    "y": 450,
+    "wires": [
+      [
+        "bkb_online_dbg_v5"
+      ]
+    ]
+  },
+  {
+    "id": "bkb_online_dbg_v5",
+    "type": "debug",
+    "z": "bkb_tab_v5",
+    "name": "ESP32 状态",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": true,
+    "complete": "payload",
+    "targetType": "msg",
+    "statusVal": "payload",
+    "statusType": "auto",
+    "x": 410,
+    "y": 450,
+    "wires": []
+  }
+]

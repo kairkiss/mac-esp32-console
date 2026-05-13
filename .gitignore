@@ -1,0 +1,37 @@
+# macOS
+.DS_Store
+
+# Local backups and live runtime exports
+backups/
+
+# Swift / Xcode / app build output
+.build/
+DerivedData/
+*.xcworkspace/xcuserdata/
+*.xcodeproj/xcuserdata/
+*.app/
+*.dSYM/
+
+# Arduino / PlatformIO build output
+build/
+.pio/
+*.elf
+*.bin
+*.map
+
+# Local secrets and generated config
+*.local
+*.local.*
+.env
+.env.*
+secrets/
+config.local.*
+
+# Logs and archives generated outside releases
+*.log
+*.tmp
+*.zip
+*.tar.gz
+
+# Codex local project metadata
+.codex/
