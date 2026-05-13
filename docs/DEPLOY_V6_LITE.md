@@ -130,3 +130,19 @@ The app renders Chinese text to 128x64 monochrome bitmap pages and posts through
 - `POST /mac-esp32/console/netconfig`
 
 v6.4 device controls are soft controls. ESP32 must already be powered; the app cannot power on a physically disconnected board.
+
+## v6.5 Diagnostics
+
+Run from the repository root:
+
+```sh
+./tools/doctor_v6_5.sh
+```
+
+The macOS App also includes a `诊断与向导` section. It checks Mosquitto, Node-RED, Hammerspoon, `macbrain_status_v6.sh`, Node-RED HTTP endpoints, ESP32 status, and the current Mac LAN IP.
+
+Package the App:
+
+```sh
+./tools/package_app_v6_5.sh
+```

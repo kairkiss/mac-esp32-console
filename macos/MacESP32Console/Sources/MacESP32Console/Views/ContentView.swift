@@ -14,6 +14,10 @@ struct ContentView: View {
         .task {
             store.startPerformanceLoop()
         }
+        .sheet(isPresented: $store.setupWizardPresented) {
+            SetupWizardView(store: store)
+                .frame(width: 760, height: 620)
+        }
     }
 }
 
@@ -72,10 +76,323 @@ struct DetailShellView: View {
                         PerformancePanel(store: store)
                     case .device:
                         DevicePanel(store: store)
+                    case .diagnostics:
+                        DiagnosticsPanel(store: store)
                     }
                 }
                 .padding(24)
                 .frame(maxWidth: 980, alignment: .topLeading)
+            }
+        }
+    }
+}
+
+private struct DiagnosticsPanel: View {
+    @ObservedObject var store: ConsoleStore
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            GlassPanel {
+                HStack(alignment: .top, spacing: 16) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        PanelTitle("系统诊断", systemImage: "stethoscope")
+                        Text("检查 Mosquitto、Node-RED、Hammerspoon、Mac 状态脚本、ESP32 在线状态和 Mac MQTT IP。")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                        if diagnosticReady {
+                            Text("上次检查：\(store.diagnosticReport.updatedAt.formatted(date: .omitted, time: .standard)) · \(store.diagnosticReport.summary)")
+                                .font(.caption)
+                                .foregroundStyle(store.diagnosticReport.hasFailure ? .red : .secondary)
+                        }
+                    }
+                    Spacer()
+                    Button {
+                        Task { await store.runDiagnostics() }
+                    } label: {
+                        if store.isDiagnosticsRunning {
+                            ProgressView().controlSize(.small)
+                        }
+                        Label("运行检查", systemImage: "play.circle")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.large)
+                    .disabled(store.isDiagnosticsRunning)
+                }
+            }
+
+            if !store.diagnosticReport.macIPs.isEmpty {
+                GlassPanel {
+                    VStack(alignment: .leading, spacing: 12) {
+                        PanelTitle("检测到的 Mac IP", systemImage: "network")
+                        ForEach(store.diagnosticReport.macIPs, id: \.self) { ip in
+                            HStack {
+                                Text(ip)
+                                    .font(.system(.body, design: .monospaced))
+                                Spacer()
+                                Button {
+                                    store.applyDetectedMacIP(ip)
+                                } label: {
+                                    Label("设为 MQTT_HOST", systemImage: "checkmark.circle")
+                                }
+                                .buttonStyle(.bordered)
+                            }
+                        }
+                    }
+                }
+            }
+
+            LazyVStack(alignment: .leading, spacing: 12) {
+                ForEach(store.diagnosticReport.items) { item in
+                    DiagnosticRow(item: item)
+                }
+            }
+
+            GlassPanel {
+                HStack {
+                    VStack(alignment: .leading, spacing: 4) {
+                        PanelTitle("首次配置向导", systemImage: "wand.and.stars")
+                        Text("重新打开分步设置：Node-RED、Wi-Fi/MQTT、DeepSeek、Telegram 和最终诊断。")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Button {
+                        store.reopenSetupWizard()
+                    } label: {
+                        Label("打开向导", systemImage: "arrow.up.forward.app")
+                    }
+                    .buttonStyle(.bordered)
+                }
+            }
+
+            LogPanel(logs: store.logs)
+        }
+        .task {
+            if store.diagnosticReport.items.isEmpty {
+                await store.runDiagnostics()
+            }
+        }
+    }
+
+    private var diagnosticReady: Bool {
+        !store.diagnosticReport.items.isEmpty
+    }
+}
+
+private struct DiagnosticRow: View {
+    let item: DiagnosticItem
+
+    var body: some View {
+        GlassPanel {
+            HStack(alignment: .top, spacing: 12) {
+                StatusPill(text: item.status.label, isOn: item.status == .pass)
+                    .padding(.top, 1)
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(item.title)
+                        .font(.headline)
+                    Text(item.detail.isEmpty ? "--" : item.detail)
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                    if !item.fix.isEmpty {
+                        Text(item.fix)
+                            .font(.caption)
+                            .foregroundStyle(item.status == .fail ? .red : .secondary)
+                    }
+                }
+                Spacer()
+            }
+        }
+    }
+}
+
+private struct SetupWizardView: View {
+    @ObservedObject var store: ConsoleStore
+    @State private var step = 0
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Mac-esp32 控制台设置")
+                        .font(.system(size: 26, weight: .semibold, design: .rounded))
+                    Text(stepTitle)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button {
+                    store.finishSetupWizard()
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                }
+                .buttonStyle(.plain)
+                .font(.title3)
+                .foregroundStyle(.secondary)
+            }
+            .padding(24)
+
+            Divider()
+
+            TabView(selection: $step) {
+                WizardNodeRedStep(store: store).tag(0)
+                WizardNetworkStep(store: store).tag(1)
+                WizardAIAndTelegramStep(store: store).tag(2)
+                WizardFinishStep(store: store).tag(3)
+            }
+            .tabViewStyle(.automatic)
+            .padding(24)
+
+            Divider()
+
+            HStack {
+                Text("\(step + 1) / 4")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button("上一步") { step = max(0, step - 1) }
+                    .disabled(step == 0)
+                Button(step == 3 ? "完成" : "下一步") {
+                    if step == 3 {
+                        store.finishSetupWizard()
+                    } else {
+                        step += 1
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+            }
+            .padding(20)
+        }
+        .background(VisualEffectView(material: .hudWindow, blendingMode: .behindWindow))
+    }
+
+    private var stepTitle: String {
+        switch step {
+        case 0: return "确认 Node-RED 和本机服务"
+        case 1: return "配置 Wi-Fi、MQTT 和 ESP32"
+        case 2: return "配置 DeepSeek 和 Telegram"
+        default: return "运行诊断并完成"
+        }
+    }
+}
+
+private struct WizardNodeRedStep: View {
+    @ObservedObject var store: ConsoleStore
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            PanelTitle("Node-RED", systemImage: "point.3.connected.trianglepath.dotted")
+            TextField("Node-RED URL", text: $store.nodeRedURL)
+                .textFieldStyle(.roundedBorder)
+            Text("默认是 http://127.0.0.1:1880。App 通过它发送 OLED bitmap、设备控制命令，并读取 ESP32 状态。")
+                .foregroundStyle(.secondary)
+            Button {
+                Task { await store.runDiagnostics() }
+            } label: {
+                Label("测试本机服务", systemImage: "checkmark.seal")
+            }
+            .buttonStyle(.borderedProminent)
+            Spacer()
+        }
+    }
+}
+
+private struct WizardNetworkStep: View {
+    @ObservedObject var store: ConsoleStore
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            PanelTitle("Wi-Fi / MQTT", systemImage: "wifi")
+            TextField("Wi-Fi SSID", text: $store.wifiSSID)
+                .textFieldStyle(.roundedBorder)
+            SecureField("Wi-Fi Password", text: $store.wifiPassword)
+                .textFieldStyle(.roundedBorder)
+            HStack {
+                TextField("Mac MQTT IP", text: $store.macMqttHost)
+                    .textFieldStyle(.roundedBorder)
+                TextField("Port", value: $store.mqttPort, format: .number)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 90)
+            }
+            if !store.diagnosticReport.macIPs.isEmpty {
+                HStack {
+                    Text("检测到：")
+                        .foregroundStyle(.secondary)
+                    ForEach(store.diagnosticReport.macIPs, id: \.self) { ip in
+                        Button(ip) { store.applyDetectedMacIP(ip) }
+                    }
+                }
+            }
+            Text("ESP32 MQTT_HOST 必须是 Mac 的局域网 IP，不能是 127.0.0.1。")
+                .foregroundStyle(.secondary)
+            Spacer()
+        }
+    }
+}
+
+private struct WizardAIAndTelegramStep: View {
+    @ObservedObject var store: ConsoleStore
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            PanelTitle("AI / Telegram", systemImage: "sparkles")
+            SecureField("DeepSeek API Key", text: $store.deepSeekAPIKey)
+                .textFieldStyle(.roundedBorder)
+            TextField("DeepSeek Model", text: $store.deepSeekModel)
+                .textFieldStyle(.roundedBorder)
+            Divider()
+            SecureField("Telegram Bot Token", text: $store.telegramToken)
+                .textFieldStyle(.roundedBorder)
+            TextField("允许的 chat_id，多个用逗号分隔", text: $store.telegramAllowedChatId)
+                .textFieldStyle(.roundedBorder)
+            Toggle("启动 App 后自动监听 Telegram", isOn: $store.telegramAutoStart)
+                .toggleStyle(.checkbox)
+            Text("API Key、Bot Token 和 Wi-Fi 密码保存到 macOS Keychain，不写入仓库。")
+                .foregroundStyle(.secondary)
+            Spacer()
+        }
+    }
+}
+
+private struct WizardFinishStep: View {
+    @ObservedObject var store: ConsoleStore
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                PanelTitle("最终检查", systemImage: "checklist")
+                Spacer()
+                Button {
+                    Task { await store.runDiagnostics() }
+                } label: {
+                    Label("运行诊断", systemImage: "play.circle")
+                }
+                .buttonStyle(.borderedProminent)
+            }
+            Text(store.diagnosticReport.items.isEmpty ? "还没有运行诊断。" : store.diagnosticReport.summary)
+                .font(.title3.weight(.semibold))
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 8) {
+                    ForEach(store.diagnosticReport.items) { item in
+                        HStack {
+                            StatusPill(text: item.status.label, isOn: item.status == .pass)
+                            VStack(alignment: .leading) {
+                                Text(item.title)
+                                Text(item.detail)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(2)
+                            }
+                            Spacer()
+                        }
+                        .padding(8)
+                        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 10))
+                    }
+                }
+            }
+        }
+        .task {
+            if store.diagnosticReport.items.isEmpty {
+                await store.runDiagnostics()
             }
         }
     }

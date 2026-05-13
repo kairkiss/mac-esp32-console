@@ -32,6 +32,10 @@ final class ConsoleStore: ObservableObject {
 
     @Published var deviceStatus = DeviceStatusSnapshot()
     @Published var isDeviceStatusRefreshing = false
+    @Published var diagnosticReport = DiagnosticReport()
+    @Published var isDiagnosticsRunning = false
+    @Published var setupWizardPresented = false
+    @Published var setupCompleted = false { didSet { savePreference(setupCompleted, for: "setupCompleted") } }
     @Published var displayQueue: [DisplayQueueItem] = []
     @Published var activeDisplayItem: DisplayQueueItem?
 
@@ -63,6 +67,7 @@ final class ConsoleStore: ObservableObject {
         telegramToken = KeychainStore.read("telegramToken")
         telegramAllowedChatId = defaults.string(forKey: "telegramAllowedChatId") ?? telegramAllowedChatId
         telegramAutoStart = defaults.object(forKey: "telegramAutoStart") as? Bool ?? telegramAutoStart
+        setupCompleted = defaults.object(forKey: "setupCompleted") as? Bool ?? setupCompleted
         wifiSSID = defaults.string(forKey: "wifiSSID") ?? wifiSSID
         wifiPassword = KeychainStore.read("wifiPassword")
         macMqttHost = defaults.string(forKey: "macMqttHost") ?? macMqttHost
@@ -71,6 +76,7 @@ final class ConsoleStore: ObservableObject {
         bitmap = OLEDRenderer.render(text: text, style: style)
         isRestoringPreferences = false
         log("Console ready")
+        setupWizardPresented = !setupCompleted
         if telegramAutoStart, !telegramToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             Task { [weak self] in
                 try? await Task.sleep(nanoseconds: 800_000_000)
@@ -170,6 +176,29 @@ final class ConsoleStore: ObservableObject {
     func clearDisplayQueue() {
         displayQueue.removeAll()
         log("Display queue cleared")
+    }
+
+    func runDiagnostics() async {
+        isDiagnosticsRunning = true
+        defer { isDiagnosticsRunning = false }
+        await refreshDeviceStatus()
+        diagnosticReport = await DiagnosticService(nodeRedURL: nodeRedURL).run(deviceStatus: deviceStatus)
+        log("Diagnostics complete: \(diagnosticReport.summary)")
+    }
+
+    func applyDetectedMacIP(_ ip: String) {
+        macMqttHost = ip
+        log("Mac MQTT IP set to \(ip)")
+    }
+
+    func finishSetupWizard() {
+        setupCompleted = true
+        setupWizardPresented = false
+        log("Setup wizard completed")
+    }
+
+    func reopenSetupWizard() {
+        setupWizardPresented = true
     }
 
     func toggleTelegram() {

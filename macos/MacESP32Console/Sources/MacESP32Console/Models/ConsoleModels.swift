@@ -6,6 +6,7 @@ enum ConsoleSection: String, CaseIterable, Identifiable {
     case deepseek
     case performance
     case device
+    case diagnostics
 
     var id: String { rawValue }
 
@@ -15,6 +16,7 @@ enum ConsoleSection: String, CaseIterable, Identifiable {
         case .deepseek: return "DeepSeek 对话"
         case .performance: return "Mac 状态"
         case .device: return "设备与配网"
+        case .diagnostics: return "诊断与向导"
         }
     }
 
@@ -24,6 +26,7 @@ enum ConsoleSection: String, CaseIterable, Identifiable {
         case .deepseek: return "短句回复，流式上屏"
         case .performance: return "CPU、内存、温度、存储"
         case .device: return "唤醒、重启、Wi-Fi/MQTT"
+        case .diagnostics: return "系统检查、首次配置"
         }
     }
 
@@ -33,6 +36,7 @@ enum ConsoleSection: String, CaseIterable, Identifiable {
         case .deepseek: return "sparkles"
         case .performance: return "gauge.with.dots.needle.67percent"
         case .device: return "wifi.router"
+        case .diagnostics: return "stethoscope"
         }
     }
 }
@@ -201,6 +205,47 @@ struct TelegramLogEntry: Identifiable {
     let id = UUID()
     var text: String
     var date = Date()
+}
+
+enum DiagnosticStatus: String {
+    case pass
+    case warn
+    case fail
+    case checking
+
+    var label: String {
+        switch self {
+        case .pass: return "PASS"
+        case .warn: return "WARN"
+        case .fail: return "FAIL"
+        case .checking: return "CHECK"
+        }
+    }
+}
+
+struct DiagnosticItem: Identifiable {
+    let id = UUID()
+    var title: String
+    var status: DiagnosticStatus
+    var detail: String
+    var fix: String
+}
+
+struct DiagnosticReport {
+    var items: [DiagnosticItem] = []
+    var macIPs: [String] = []
+    var updatedAt = Date.distantPast
+
+    var hasFailure: Bool {
+        items.contains { $0.status == .fail }
+    }
+
+    var summary: String {
+        let passCount = items.filter { $0.status == .pass }.count
+        let warnCount = items.filter { $0.status == .warn }.count
+        let failCount = items.filter { $0.status == .fail }.count
+        return "\(passCount) pass / \(warnCount) warn / \(failCount) fail"
+    }
 }
 
 private extension StringProtocol {

@@ -32,6 +32,7 @@ config.local.*
 *.tmp
 *.zip
 *.tar.gz
+dist/
 
 # Codex local project metadata
 .codex/

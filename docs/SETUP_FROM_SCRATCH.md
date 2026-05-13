@@ -170,6 +170,15 @@ http://127.0.0.1:1880
 - scene 可切换
 - screen_on 有状态
 
+第一次启动 App 时会打开配置向导。建议按顺序完成：
+
+1. 测试 Node-RED 和本机服务。
+2. 填写 Wi-Fi、Mac MQTT IP 和 MQTT port。
+3. 填写可选的 DeepSeek API Key、Telegram Bot Token、chat_id 白名单。
+4. 运行最终诊断。
+
+也可以随时打开 `诊断与向导` 板块重新检查系统。
+
 ## 9. DeepSeek
 
 在 App 中填入 DeepSeek API Key。
@@ -211,6 +220,12 @@ App 无法控制设备：
 
 ```sh
 curl http://127.0.0.1:1880/mac-esp32/console/status
+```
+
+运行完整诊断：
+
+```sh
+./tools/doctor_v6_5.sh
 ```
 
 风扇不工作：
