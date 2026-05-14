@@ -50,6 +50,7 @@ const unsigned long MAC_LONG_OFFLINE_MS = 60000;
 const unsigned long HEARTBEAT_STALE_MS = 10000;
 const unsigned long PET_STATE_MS = 10000;
 const unsigned long TELEMETRY_MS = 30000;
+const unsigned long LEGACY_ONLINE_MS = 5000;
 const unsigned long FACE_FRAME_MS = 130;
 const unsigned long FAN_UPDATE_MS = 200;
 const unsigned long COMPAT_VIEW_MS = 6000;
@@ -1104,22 +1105,36 @@ private:
       String pass;
       String mqtt;
       int port = Config::MQTT_PORT;
-      if (server.hasHeader("Content-Type") && server.header("Content-Type").indexOf("application/json") >= 0) {
+      String body = server.arg("plain");
+      body.trim();
+      if (body.startsWith("{")) {
         StaticJsonDocument<512> doc;
-        DeserializationError err = deserializeJson(doc, server.arg("plain"));
+        DeserializationError err = deserializeJson(doc, body);
         if (err) {
+          server.sendHeader("Access-Control-Allow-Origin", "*");
           server.send(400, "application/json", "{\"ok\":false,\"error\":\"bad_json\"}");
           return;
         }
         ssid = doc["ssid"] | "";
-        pass = doc["password"] | "";
-        mqtt = doc["mqtt_host"] | "";
-        port = doc["mqtt_port"] | Config::MQTT_PORT;
+        pass = doc["password"] | doc["pass"] | "";
+        mqtt = doc["mqtt_host"] | doc["mqtt"] | "";
+        port = doc["mqtt_port"] | doc["port"] | Config::MQTT_PORT;
       } else {
         ssid = server.arg("ssid");
         pass = server.arg("pass");
+        if (pass.length() == 0) pass = server.arg("password");
         mqtt = server.arg("mqtt");
-        port = server.arg("port").toInt();
+        if (mqtt.length() == 0) mqtt = server.arg("mqtt_host");
+        String portArg = server.arg("port");
+        if (portArg.length() == 0) portArg = server.arg("mqtt_port");
+        port = portArg.toInt();
+      }
+      ssid.trim();
+      mqtt.trim();
+      if (ssid.length() == 0 || mqtt.length() == 0) {
+        server.sendHeader("Access-Control-Allow-Origin", "*");
+        server.send(400, "application/json", "{\"ok\":false,\"error\":\"missing_ssid_or_mqtt_host\"}");
+        return;
       }
       cfg.save(ssid, pass, mqtt, port);
       server.sendHeader("Access-Control-Allow-Origin", "*");
@@ -1147,6 +1162,7 @@ unsigned long lastMqttAttemptMs = 0;
 uint8_t mqttFailCount = 0;
 unsigned long lastPetStateMs = 0;
 unsigned long lastTelemetryMs = 0;
+unsigned long lastLegacyOnlineMs = 0;
 unsigned long lastFaceFrameMs = 0;
 
 // ========================= MQTT Bridge =========================
@@ -1418,6 +1434,11 @@ void loop() {
   if (display.screenOn && !sceneActive && now - lastFaceFrameMs >= Config::FACE_FRAME_MS) {
     lastFaceFrameMs = now;
     faceEngine.draw(display);
+  }
+
+  if (mqttClient.connected() && now - lastLegacyOnlineMs >= Config::LEGACY_ONLINE_MS) {
+    lastLegacyOnlineMs = now;
+    publishLegacyOnline("online");
   }
 
   if (mqttClient.connected() && now - lastPetStateMs >= Config::PET_STATE_MS) {

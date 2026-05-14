@@ -162,8 +162,9 @@ if (msg.req && routeIs("/bkb/console/status", "/mac-esp32/console/status")) {
   const stateAge = now - Number(flow.get("bkb_v6_pet_state_ms") || 0);
   const telemetryAge = now - Number(flow.get("bkb_v6_pet_telemetry_ms") || 0);
   const freshAge = Math.min(stateAge, telemetryAge);
-  const online = onlineRaw === true && freshAge < 60000;
   const petView = Object.assign({}, telemetry, petState);
+  const petConnected = petView.mqtt_connected === true && freshAge < 60000;
+  const online = (onlineRaw === true && freshAge < 60000) || petConnected;
   return [null, null, httpJson({
     ok: true,
     online,
@@ -647,7 +648,7 @@ flow = [
         "id": "bkb_status_exec_v6_lite",
         "type": "exec",
         "z": "bkb_tab_v6_lite",
-        "command": "/Users/YOUR_MAC_USERNAME/bin/macbrain_status_v6.sh",
+        "command": "$HOME/bin/macbrain_status_v6.sh",
         "addpay": "",
         "append": "",
         "useSpawn": "false",
