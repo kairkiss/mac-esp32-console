@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import UniformTypeIdentifiers
 
 @MainActor
 final class ConsoleStore: ObservableObject {
@@ -23,6 +24,7 @@ final class ConsoleStore: ObservableObject {
 
     @Published var performance = MacPerformanceSnapshot()
     @Published var isPerformanceRefreshing = false
+    @Published var macContext = MacContextSnapshot()
 
     @Published var telegramToken = "" { didSet { saveSecret(telegramToken, account: "telegramToken") } }
     @Published var telegramAllowedChatId = "" { didSet { savePreference(telegramAllowedChatId, for: "telegramAllowedChatId") } }
@@ -46,6 +48,13 @@ final class ConsoleStore: ObservableObject {
     @Published var mqttPort = 1883 { didSet { savePreference(mqttPort, for: "mqttPort") } }
     @Published var configPortalURL = "http://192.168.4.1" { didSet { savePreference(configPortalURL, for: "configPortalURL") } }
     @Published var isDeviceBusy = false
+    @Published var autoUpdateMQTTHost = false { didSet { savePreference(autoUpdateMQTTHost, for: "autoUpdateMQTTHost") } }
+    @Published var currentMacIPHint = ""
+    @Published var otaStatus = OTAStatusSnapshot.empty
+    @Published var otaSelectedFile: URL?
+    @Published var otaProgress = 0.0
+    @Published var otaMessage = "未检查"
+    @Published var isOTAWorking = false
 
     @Published var logs: [String] = []
 
@@ -75,6 +84,7 @@ final class ConsoleStore: ObservableObject {
         macMqttHost = defaults.string(forKey: "macMqttHost") ?? macMqttHost
         mqttPort = defaults.object(forKey: "mqttPort") as? Int ?? mqttPort
         configPortalURL = defaults.string(forKey: "configPortalURL") ?? configPortalURL
+        autoUpdateMQTTHost = defaults.object(forKey: "autoUpdateMQTTHost") as? Bool ?? autoUpdateMQTTHost
         bitmap = OLEDRenderer.render(text: text, style: style)
         isRestoringPreferences = false
         log("Console ready")
@@ -98,7 +108,9 @@ final class ConsoleStore: ObservableObject {
         performanceTask = Task { [weak self] in
             while !Task.isCancelled {
                 await self?.refreshPerformance()
+                await self?.refreshMacContext()
                 await self?.refreshDeviceStatus()
+                await self?.checkMacIPDrift()
                 try? await Task.sleep(nanoseconds: 3_000_000_000)
             }
         }
@@ -156,8 +168,18 @@ final class ConsoleStore: ObservableObject {
     }
 
     func showPerformanceOnOLED() async {
-        let status = oledPerformanceText(performance)
-        enqueueDisplayText(status, style: .full, durationMs: 6000, source: .performance)
+        bitmap = OLEDWidgetRenderer.renderMetricDashboard(
+            cpu: performance.cpuPct,
+            mem: performance.memPct,
+            temp: performance.tempC,
+            fan: deviceStatus.fanPct,
+            app: performance.app
+        )
+        await sendBitmapToOLED(bitmap, durationMs: 7000, source: "performance", logPrefix: "Mac 状态 Dashboard")
+    }
+
+    func refreshMacContext() async {
+        macContext = await MacContextProvider().snapshot()
     }
 
     func refreshDeviceStatus() async {
@@ -215,6 +237,19 @@ final class ConsoleStore: ObservableObject {
         await refreshDeviceStatus()
         diagnosticReport = await DiagnosticService(nodeRedURL: nodeRedURL).run(deviceStatus: deviceStatus)
         log("Connection repair finished: \(diagnosticReport.summary)")
+    }
+
+    func checkMacIPDrift() async {
+        let report = await DiagnosticService(nodeRedURL: nodeRedURL).run(deviceStatus: deviceStatus)
+        guard let ip = report.macIPs.first(where: { !$0.hasPrefix("192.168.4.") }) ?? report.macIPs.first else { return }
+        currentMacIPHint = ip
+        if autoUpdateMQTTHost && macMqttHost != ip {
+            macMqttHost = ip
+            log("Mac IP changed; auto updating MQTT_HOST to \(ip)")
+            if deviceStatus.online {
+                await applyNetworkConfigOnline()
+            }
+        }
     }
 
     func applyDetectedMacIP(_ ip: String) {
@@ -323,6 +358,159 @@ final class ConsoleStore: ObservableObject {
         }
     }
 
+    func copyCurrentDeviceStatus() {
+        let summary = """
+        # Mac-ESP32 Device Status
+
+        - Online: \(deviceStatus.online)
+        - Firmware: \(deviceStatus.firmware)
+        - IP: \(deviceStatus.ip)
+        - RSSI: \(deviceStatus.rssi)
+        - MQTT: \(deviceStatus.mqttConnected)
+        - MQTT Host: \(deviceStatus.mqttHost)
+        - MacLink: \(deviceStatus.macLink)
+        - Network Reason: \(deviceStatus.networkReason)
+        - Mood: \(deviceStatus.mood)
+        - Scene: \(deviceStatus.scene)
+        - Screen: \(deviceStatus.screenOn)
+        - Fan: \(deviceStatus.fanPct)%
+        - Temp Seen: \(deviceStatus.tempSeen)
+        - Last Mac State Age: \(deviceStatus.lastMacStateAgeMs) ms
+        """
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(summary, forType: .string)
+        log("Device status copied")
+    }
+
+    func exportDiagnostics() async {
+        await refreshPerformance()
+        await refreshDeviceStatus()
+        if diagnosticReport.items.isEmpty {
+            diagnosticReport = await DiagnosticService(nodeRedURL: nodeRedURL).run(deviceStatus: deviceStatus)
+        }
+        do {
+            let url = try DiagnosticExportService().export(
+                deviceStatus: deviceStatus,
+                diagnosticReport: diagnosticReport,
+                appLogs: logs,
+                telegramLogs: telegramLogs,
+                performance: performance
+            )
+            log("Diagnostic package exported: \(url.path)")
+        } catch {
+            log("Diagnostic export failed: \(error.localizedDescription)")
+        }
+    }
+
+    func sendTestExpression(_ name: String) async {
+        let text = "Expression\n\(name.uppercased())\nMac-ESP32"
+        enqueueDisplayText(text, style: .bubble, durationMs: 6000, source: .console)
+    }
+
+    func sendMetricDashboardWidget() async {
+        await showPerformanceOnOLED()
+    }
+
+    func sendScenePreset(_ preset: DisplayScenePreset) async {
+        let image: OLEDBitmap
+        switch preset.id {
+        case .coding:
+            image = OLEDWidgetRenderer.renderMetricDashboard(cpu: performance.cpuPct, mem: performance.memPct, temp: performance.tempC, fan: deviceStatus.fanPct, app: macContext.app)
+        case .music:
+            let playing = macContext.nowPlaying ?? NowPlayingSnapshot(title: "No track", artist: "Apple Music", progress: 0.2)
+            image = OLEDWidgetRenderer.renderNowPlaying(title: playing.title, artist: playing.artist, progress: playing.progress)
+        case .calendar:
+            let event = macContext.nextEvent ?? CalendarEventSnapshot(title: "Calendar ready", time: "No access", minutesLeft: nil)
+            image = OLEDWidgetRenderer.renderCalendarNext(title: event.title, time: event.time, minutesLeft: event.minutesLeft)
+        case .night:
+            image = OLEDWidgetRenderer.renderDreamcoreText(["夜深了", "屏幕轻一点", "我还醒着"])
+        case .dreamcore:
+            image = OLEDWidgetRenderer.renderDreamcoreText(["旧窗口在发光", "风从像素里来", "别忘了保存"])
+        case .diagnostics:
+            image = OLEDWidgetRenderer.renderNetworkError(reason: deviceStatus.networkReason, detail: deviceStatus.ip)
+        case .ota:
+            image = OLEDWidgetRenderer.renderOTAProgress(percent: 42, phase: "testing")
+        case .networkError:
+            image = OLEDWidgetRenderer.renderNetworkError(reason: "mqtt_failed", detail: macMqttHost)
+        case .dashboard:
+            image = OLEDWidgetRenderer.renderMetricDashboard(cpu: performance.cpuPct, mem: performance.memPct, temp: performance.tempC, fan: deviceStatus.fanPct, app: performance.app)
+        }
+        bitmap = image
+        await sendBitmapToOLED(image, durationMs: preset.durationMs, source: preset.source, logPrefix: preset.title)
+    }
+
+    func queryOTAStatus() async {
+        guard deviceStatus.online else {
+            otaMessage = "ESP32 离线，无法查询 OTA"
+            return
+        }
+        isOTAWorking = true
+        defer { isOTAWorking = false }
+        do {
+            otaStatus = try await ESP32DirectClient(host: deviceStatus.ip).fetchOTAStatus()
+            otaMessage = otaStatus.otaSupported ? "OTA 可用" : "OTA 不可用：\(otaStatus.reason)"
+            log("OTA status: \(otaMessage)")
+        } catch {
+            otaMessage = "OTA 查询失败：\(error.localizedDescription)"
+            log(otaMessage)
+        }
+    }
+
+    func chooseFirmwareFile() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.data]
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        if panel.runModal() == .OK, let url = panel.url {
+            guard url.pathExtension.lowercased() == "bin" else {
+                otaMessage = "请选择 .bin 固件文件"
+                return
+            }
+            otaSelectedFile = url
+            otaMessage = "已选择 \(url.lastPathComponent)"
+        }
+    }
+
+    func uploadFirmwareOTA() async {
+        guard let file = otaSelectedFile else {
+            otaMessage = "请先选择 .bin 文件"
+            return
+        }
+        guard deviceStatus.online else {
+            otaMessage = "ESP32 离线，不能 OTA"
+            return
+        }
+        isOTAWorking = true
+        otaProgress = 0
+        defer { isOTAWorking = false }
+        do {
+            let attrs = try FileManager.default.attributesOfItem(atPath: file.path)
+            let size = attrs[.size] as? NSNumber
+            if (size?.intValue ?? 0) <= 0 {
+                otaMessage = "固件文件为空"
+                return
+            }
+            let status = try await ESP32DirectClient(host: deviceStatus.ip).fetchOTAStatus()
+            guard status.otaSupported else {
+                otaMessage = "当前分区不支持 OTA：\(status.reason)"
+                return
+            }
+            if let size, size.intValue > status.freeSketchSpace {
+                otaMessage = "固件过大：\(size.intValue) > \(status.freeSketchSpace)"
+                return
+            }
+            otaMessage = "正在上传 OTA..."
+            try await ESP32DirectClient(host: deviceStatus.ip).uploadFirmware(fileURL: file) { [weak self] value in
+                Task { @MainActor in self?.otaProgress = value }
+            }
+            otaMessage = "OTA 上传完成，ESP32 将重启"
+            log(otaMessage)
+        } catch {
+            otaMessage = "OTA 失败：\(error.localizedDescription)"
+            log(otaMessage)
+        }
+    }
+
     func log(_ message: String) {
         let ts = DateFormatter.localizedString(from: Date(), dateStyle: .none, timeStyle: .medium)
         logs.insert("[\(ts)] \(message)", at: 0)
@@ -383,6 +571,15 @@ final class ConsoleStore: ObservableObject {
                 try await NodeRedClient(baseURL: nodeRedURL).sendPages(pages, durationMs: max(6000, durationMs), source: source)
             }
             log("\(logPrefix) sent \(pages.count) page(s) to ESP32")
+        } catch {
+            log("\(logPrefix) send failed: \(error.localizedDescription)")
+        }
+    }
+
+    private func sendBitmapToOLED(_ bitmap: OLEDBitmap, durationMs: Int, source: String, logPrefix: String) async {
+        do {
+            try await NodeRedClient(baseURL: nodeRedURL).send(bitmap: bitmap, durationMs: durationMs)
+            log("\(logPrefix) sent to ESP32")
         } catch {
             log("\(logPrefix) send failed: \(error.localizedDescription)")
         }
@@ -535,15 +732,45 @@ final class ConsoleStore: ObservableObject {
         } else if text == "/device" {
             await refreshDeviceStatus()
             try? await client.sendMessage(chatId: chatId, text: formatDeviceForTelegram(deviceStatus))
-        } else if text == "/wake" {
-            await wakeDevice()
-            try? await client.sendMessage(chatId: chatId, text: "已发送唤醒命令")
+        } else if text == "/wake" || text == "/screen_on" {
+            await handleTelegramWake(chatId: chatId, client: client)
+        } else if text == "/screen_off" {
+            await refreshDeviceStatus()
+            guard deviceStatus.online else {
+                try? await client.sendMessage(chatId: chatId, text: "设备离线，无法熄屏。可发送 /repair。")
+                return
+            }
+            await screenOffDevice()
+            try? await client.sendMessage(chatId: chatId, text: "OLED 已熄屏。")
+        } else if text == "/repair" {
+            await repairConnection()
+            await refreshDeviceStatus()
+            try? await client.sendMessage(chatId: chatId, text: deviceStatus.online ? "连接修复已完成，设备在线。" : "已尝试修复，但设备仍离线。请在 App 里检查配网。")
+        } else if text == "/help" {
+            try? await client.sendMessage(chatId: chatId, text: telegramHelpText)
         } else {
-            try? await client.sendMessage(
-                chatId: chatId,
-                text: "命令：\n/show 文字\n/ask 问题\n/status\n/device\n/wake"
-            )
+            try? await client.sendMessage(chatId: chatId, text: telegramHelpText)
         }
+    }
+
+    private var telegramHelpText: String {
+        "命令：/show 文字｜/ask 问题｜/status｜/device｜/wake｜/screen_on｜/screen_off｜/repair"
+    }
+
+    private func handleTelegramWake(chatId: Int64, client: TelegramClient) async {
+        await refreshDeviceStatus()
+        guard deviceStatus.online else {
+            try? await client.sendMessage(chatId: chatId, text: "设备当前离线，无法直接唤醒屏幕。可发送 /repair 或在 App 里点一键修复连接。")
+            return
+        }
+        let wasOn = deviceStatus.screenOn == "true"
+        await wakeDevice()
+        await clearSceneDevice()
+        enqueueDisplayText("你好\nOLED 已点亮", style: .bubble, durationMs: 6000, source: .telegram)
+        try? await Task.sleep(nanoseconds: 1_000_000_000)
+        await refreshDeviceStatus()
+        let reply = wasOn ? "小屏幕已经亮着，我帮你刷新了一下状态。" : "已唤醒小屏幕，OLED 已点亮。"
+        try? await client.sendMessage(chatId: chatId, text: reply)
     }
 
     private func telegramChatAllowed(_ chatId: Int64) -> Bool {
@@ -565,6 +792,7 @@ final class ConsoleStore: ObservableObject {
         Scene: \(snapshot.scene)
         Screen: \(snapshot.screenOn)
         Fan: \(snapshot.fanPct)%
+        Net: \(snapshot.networkReason)
         """
     }
 

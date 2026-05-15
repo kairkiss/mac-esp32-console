@@ -22,6 +22,7 @@
 #include <ArduinoJson.h>
 #include <U8g2lib.h>
 #include <SPI.h>
+#include <Update.h>
 #include "mbedtls/base64.h"
 
 // ========================= Config =========================
@@ -32,6 +33,7 @@ const char* MQTT_HOST = "192.168.1.100";
 const int MQTT_PORT = 1883;
 const char* DEVICE_ID = "desk1";
 const char* FW_NAME = "v6.4-control-center";
+const char* FW_VERSION = "v7.0.0-alpha1";
 const char* CONFIG_AP_SSID = "MacESP32-Setup";
 const char* CONFIG_AP_PASS = "macesp32";
 
@@ -1045,11 +1047,16 @@ private:
   }
 };
 
+extern DisplayEngine display;
+
 // ========================= ConfigPortal =========================
 class ConfigPortal {
 public:
   WebServer server;
   bool active = false;
+  bool otaActive = false;
+  unsigned long otaLastMs = 0;
+  size_t otaTotal = 0;
 
   ConfigPortal() : server(80) {}
 
@@ -1070,6 +1077,24 @@ public:
   }
 
 private:
+  String otaStatusJson() {
+    StaticJsonDocument<384> doc;
+    size_t sketchSize = ESP.getSketchSize();
+    size_t freeSpace = ESP.getFreeSketchSpace();
+    bool supported = freeSpace > 0;
+    doc["ok"] = true;
+    doc["fw"] = Config::FW_NAME;
+    doc["fw_version"] = Config::FW_VERSION;
+    doc["free_heap"] = ESP.getFreeHeap();
+    doc["sketch_size"] = sketchSize;
+    doc["free_sketch_space"] = freeSpace;
+    doc["ota_supported"] = supported;
+    doc["reason"] = supported ? "ok" : "no_ota_partition_or_no_free_sketch_space";
+    char out[384];
+    size_t n = serializeJson(doc, out);
+    return String(out).substring(0, n);
+  }
+
   void bindRoutes(NetworkConfig& cfg) {
     server.on("/", HTTP_GET, [&cfg, this]() {
       String html = "<!doctype html><html><head><meta name='viewport' content='width=device-width,initial-scale=1'>"
@@ -1094,6 +1119,62 @@ private:
       char out[256];
       size_t n = serializeJson(doc, out);
       server.send(200, "application/json", String(out).substring(0, n));
+    });
+    server.on("/ota/status", HTTP_GET, [this]() {
+      server.sendHeader("Access-Control-Allow-Origin", "*");
+      server.send(200, "application/json", otaStatusJson());
+    });
+    server.on("/ota/upload", HTTP_OPTIONS, [this]() {
+      server.sendHeader("Access-Control-Allow-Origin", "*");
+      server.sendHeader("Access-Control-Allow-Headers", "content-type,x-firmware-name,x-ota-token");
+      server.send(204);
+    });
+    server.on("/ota/upload", HTTP_POST, [this]() {
+      server.sendHeader("Access-Control-Allow-Origin", "*");
+      if (Update.hasError()) {
+        display.setScreen(true);
+        display.drawText("OTA FAIL", String(Update.getError()), "current fw kept", "");
+        server.send(500, "application/json", "{\"ok\":false,\"error\":\"update_failed\"}");
+      } else {
+        display.setScreen(true);
+        display.drawText("OTA", "REBOOTING", "", "");
+        server.send(200, "application/json", "{\"ok\":true,\"rebooting\":true}");
+        delay(600);
+        ESP.restart();
+      }
+      otaActive = false;
+    }, [this]() {
+      HTTPUpload& upload = server.upload();
+      if (upload.status == UPLOAD_FILE_START) {
+        otaActive = true;
+        otaTotal = 0;
+        otaLastMs = millis();
+        display.setScreen(true);
+        display.drawText("OTA READY", "UPDATING", "0%", "");
+        size_t freeSpace = ESP.getFreeSketchSpace();
+        if (freeSpace == 0 || !Update.begin(freeSpace)) {
+          display.drawText("OTA FAIL", "no ota space", "", "");
+        }
+      } else if (upload.status == UPLOAD_FILE_WRITE) {
+        if (!Update.hasError()) {
+          size_t written = Update.write(upload.buf, upload.currentSize);
+          otaTotal += written;
+          if (millis() - otaLastMs > 350) {
+            otaLastMs = millis();
+            int pct = ESP.getFreeSketchSpace() > 0 ? min(99, (int)((otaTotal * 100UL) / ESP.getFreeSketchSpace())) : 0;
+            display.drawText("OTA UPDATE", "UPDATING", String(pct) + "%", "");
+          }
+        }
+      } else if (upload.status == UPLOAD_FILE_END) {
+        display.drawText("OTA UPDATE", "VERIFYING", String(otaTotal) + " bytes", "");
+        if (!Update.end(true)) {
+          display.drawText("OTA FAIL", String(Update.getError()), "current fw kept", "");
+        }
+      } else if (upload.status == UPLOAD_FILE_ABORTED) {
+        Update.abort();
+        otaActive = false;
+        display.drawText("OTA FAIL", "aborted", "current fw kept", "");
+      }
     });
     server.on("/config", HTTP_OPTIONS, [this]() {
       server.sendHeader("Access-Control-Allow-Origin", "*");
@@ -1164,17 +1245,30 @@ unsigned long lastPetStateMs = 0;
 unsigned long lastTelemetryMs = 0;
 unsigned long lastLegacyOnlineMs = 0;
 unsigned long lastFaceFrameMs = 0;
+unsigned long lastNetworkHintMs = 0;
 
 // ========================= MQTT Bridge =========================
+const char* networkReason() {
+  if (WiFi.status() != WL_CONNECTED) return "wifi_disconnected";
+  if (!mqttClient.connected()) return mqttFailCount > 0 ? "mqtt_failed" : "mqtt_disconnected";
+  if (!macLink.macAvailable()) return macLink.longOffline() ? "mac_offline" : "mac_stale";
+  return "ok";
+}
+
 void publishPetState(bool retain) {
   StaticJsonDocument<1024> doc;
   doc["v"] = 1;
   doc["id"] = Config::DEVICE_ID;
   doc["fw"] = Config::FW_NAME;
+  doc["fw_version"] = Config::FW_VERSION;
+  doc["free_heap"] = ESP.getFreeHeap();
+  doc["sketch_size"] = ESP.getSketchSize();
+  doc["free_sketch_space"] = ESP.getFreeSketchSpace();
   doc["uptime_ms"] = millis();
   doc["ip"] = WiFi.localIP().toString();
   doc["rssi"] = WiFi.RSSI();
   doc["mqtt_host"] = networkConfig.mqttHost;
+  doc["network_reason"] = networkReason();
   doc["config_portal"] = configPortal.active;
   doc["config_ap"] = Config::CONFIG_AP_SSID;
   doc["mac_link"] = macLink.macAvailable() ? "ok" : (macLink.longOffline() ? "offline" : "stale");
@@ -1188,6 +1282,7 @@ void publishPetState(bool retain) {
   doc["inactive_age_ms"] = screenPolicy.inactiveAgeMs();
   doc["screen_off_reason"] = screenPolicy.offReason;
   doc["fan_pct"] = fanController.fanPct;
+  doc["last_mac_state_age_ms"] = macLink.stateAgeMs();
   doc["temp_c_seen"] = macLink.tempValid() ? macLink.tempC : -1;
   doc["mqtt_connected"] = mqttClient.connected();
   char buf[1024];
@@ -1200,15 +1295,20 @@ void publishLegacyOnline(const char* status) {
 }
 
 void publishTelemetry() {
-  StaticJsonDocument<768> doc;
+  StaticJsonDocument<1024> doc;
   doc["v"] = 1;
   doc["id"] = Config::DEVICE_ID;
   doc["fw"] = Config::FW_NAME;
+  doc["fw_version"] = Config::FW_VERSION;
   doc["uptime_ms"] = millis();
   doc["heap"] = ESP.getFreeHeap();
+  doc["free_heap"] = ESP.getFreeHeap();
+  doc["sketch_size"] = ESP.getSketchSize();
+  doc["free_sketch_space"] = ESP.getFreeSketchSpace();
   doc["ip"] = WiFi.localIP().toString();
   doc["rssi"] = WiFi.RSSI();
   doc["mqtt_host"] = networkConfig.mqttHost;
+  doc["network_reason"] = networkReason();
   doc["mqtt_connected"] = mqttClient.connected();
   doc["config_portal"] = configPortal.active;
   doc["config_ap"] = Config::CONFIG_AP_SSID;
@@ -1224,7 +1324,7 @@ void publishTelemetry() {
   doc["fan_pct"] = fanController.fanPct;
   doc["last_mac_state_age_ms"] = macLink.stateAgeMs();
   doc["temp_c_seen"] = macLink.tempValid() ? macLink.tempC : -1;
-  char buf[768];
+  char buf[1024];
   size_t n = serializeJson(doc, buf);
   mqttClient.publish("bkb/desk1/pet/telemetry", (const uint8_t*)buf, n, false);
 }
@@ -1349,6 +1449,8 @@ bool connectMqtt() {
   if (!mqttClient.connect(clientId.c_str(), "bkb/desk1/state/online", 0, true, "offline")) {
     Serial.printf("MQTT connect failed state=%d\n", mqttClient.state());
     mqttFailCount++;
+    display.setScreen(true);
+    display.drawText("MQTT fail", networkConfig.mqttHost, String(networkConfig.mqttPort), "check Mac IP");
     if (mqttFailCount >= 3) configPortal.begin(networkConfig, display);
     return false;
   }
@@ -1387,7 +1489,7 @@ void ensureWiFi() {
     display.drawText("WiFi OK", WiFi.localIP().toString(), "MQTT next", "");
   } else {
     Serial.println("WiFi failed; local fallback");
-    display.drawText("WiFi failed", "local fallback", "", "");
+    display.drawText("Wi-Fi fail", networkConfig.wifiSsid, "Setup AP", Config::CONFIG_AP_SSID);
     configPortal.begin(networkConfig, display);
   }
 }
@@ -1414,6 +1516,9 @@ void setup() {
 void loop() {
   unsigned long now = millis();
   configPortal.loop();
+  if (configPortal.otaActive) {
+    return;
+  }
 
   if (WiFi.status() != WL_CONNECTED) ensureWiFi();
   if (WiFi.status() == WL_CONNECTED && !mqttClient.connected() && now - lastMqttAttemptMs > 2500) {
@@ -1421,6 +1526,12 @@ void loop() {
     connectMqtt();
   }
   if (mqttClient.connected()) mqttClient.loop();
+
+  if (mqttClient.connected() && !macLink.macAvailable() && now - lastNetworkHintMs >= 15000) {
+    lastNetworkHintMs = now;
+    display.setScreen(true);
+    display.drawText("Mac stale", "age ms", String(macLink.stateAgeMs()), "Node-RED?");
+  }
 
   bool sceneCurrentlyActive = sceneEngine.active(now);
   faceEngine.updateDecision(macLink, runtimeConfig, sceneEngine.sceneMood(), sceneCurrentlyActive);

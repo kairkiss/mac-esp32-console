@@ -23,7 +23,7 @@ It turns the Mac into a live state publisher and the ESP32 into a small physical
 
 中文简介：这是一个本地优先的 Mac 桌面状态屏 / ESP32 桌宠项目。Mac 负责采集状态和处理高级逻辑，Node-RED 负责状态编排与 HTTP API，MQTT 负责通信，ESP32 负责本地表情引擎、OLED 渲染、设备状态与 failsafe。
 
-Current version: `v6.6.0`
+Current version: `v7.0.0-alpha1`
 
 ---
 
@@ -69,13 +69,31 @@ The SwiftUI app in `macos/MacESP32Console` provides:
 
 ### Diagnostics
 
-v6.5 includes an in-app diagnostics page and a terminal doctor script:
+The app includes an in-app diagnostics page and a terminal doctor script:
 
 ```sh
 ./tools/doctor_v6_5.sh
 ```
 
 It checks Mosquitto, Node-RED, Hammerspoon, Mac telemetry script, console endpoints, ESP32 status and local network IP candidates.
+
+### v7.0.0-alpha1 additions
+
+- ESP32 OTA status and LAN firmware upload first stage.
+- Enhanced Device page with copy status, diagnostic export, test expressions and bitmap widgets.
+- Mac ecosystem display presets for coding, music, calendar, night, dreamcore, diagnostics, OTA, network error and dashboard.
+- Foreground window context and best-effort now-playing provider.
+- Network reason reporting for Wi-Fi, MQTT and stale Mac state.
+- Telegram `/wake` now wakes the OLED screen rather than implying the Mac was unlocked.
+
+See:
+
+```text
+docs/V7_0_ALPHA1_PLAN.md
+docs/OTA_UPDATE.md
+docs/MAC_ECOSYSTEM_DISPLAY.md
+docs/SHORTCUTS_INTEGRATION.md
+```
 
 ---
 
@@ -276,7 +294,7 @@ This project is designed to run mainly on your own Mac and local network. Keep l
 A release may include source tag, release notes and a packaged macOS app zip if locally buildable.
 
 ```sh
-./tools/package_app_v6_5.sh
+./tools/package_release.sh 7.0.0-alpha1
 ```
 
 ---

@@ -8,6 +8,17 @@ enum OLEDRenderer {
 
     static func render(text: String, style: ConsoleStyle) -> OLEDBitmap {
         let id = "console-\(Int(Date().timeIntervalSince1970))"
+        return renderBase(id: id) { ctx in
+            drawChrome(style: style, in: ctx)
+            drawText(text, style: style, in: ctx)
+        }
+    }
+
+    static func renderCustom(idPrefix: String, draw: (CGContext) -> Void) -> OLEDBitmap {
+        renderBase(id: "\(idPrefix)-\(Int(Date().timeIntervalSince1970))", draw: draw)
+    }
+
+    private static func renderBase(id: String, draw: (CGContext) -> Void) -> OLEDBitmap {
         var pixels = [UInt8](repeating: 0, count: width * height)
         let colorSpace = CGColorSpaceCreateDeviceGray()
 
@@ -25,8 +36,7 @@ enum OLEDRenderer {
             ctx.setShouldAntialias(false)
             ctx.setFillColor(NSColor.black.cgColor)
             ctx.fill(CGRect(x: 0, y: 0, width: width, height: height))
-            drawChrome(style: style, in: ctx)
-            drawText(text, style: style, in: ctx)
+            draw(ctx)
         }
 
         let oledPixels = flipVertical(pixels)

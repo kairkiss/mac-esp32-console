@@ -6,6 +6,8 @@ cd "$(dirname "$0")/.."
 APP_NAME="Mac-esp32控制台"
 PRODUCT_NAME="MacESP32Console"
 BUNDLE_ID="com.biankai.macesp32console"
+APP_VERSION="${APP_VERSION:-7.0.0-alpha1}"
+BUILD_VERSION="${BUILD_VERSION:-7001}"
 DIST_DIR="$PWD/dist"
 APP_BUNDLE="$DIST_DIR/$APP_NAME.app"
 DESKTOP_APP="$HOME/Desktop/$APP_NAME.app"
@@ -39,9 +41,9 @@ cat > "$APP_BUNDLE/Contents/Info.plist" <<PLIST
   <key>CFBundlePackageType</key>
   <string>APPL</string>
   <key>CFBundleShortVersionString</key>
-  <string>6.6.0</string>
+  <string>$APP_VERSION</string>
   <key>CFBundleVersion</key>
-  <string>6.6.0</string>
+  <string>$BUILD_VERSION</string>
   <key>LSMinimumSystemVersion</key>
   <string>13.0</string>
   <key>NSHighResolutionCapable</key>

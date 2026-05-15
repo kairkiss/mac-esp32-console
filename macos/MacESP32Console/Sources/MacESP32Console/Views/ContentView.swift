@@ -498,10 +498,43 @@ private struct ScreenComposerPanel: View {
                     .onChange(of: store.text) { _ in store.renderPreview() }
                     .onChange(of: store.style) { _ in store.renderPreview() }
 
+                ScenePresetPanel(store: store)
                 DisplayQueuePanel(store: store)
                 LogPanel(logs: store.logs)
             }
             .frame(minWidth: 360)
+        }
+    }
+}
+
+private struct ScenePresetPanel: View {
+    @ObservedObject var store: ConsoleStore
+
+    var body: some View {
+        GlassPanel {
+            VStack(alignment: .leading, spacing: 12) {
+                PanelTitle("场景预设", systemImage: "rectangle.3.group")
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 110), spacing: 8)], spacing: 8) {
+                    ForEach(ScenePresetLibrary.presets) { preset in
+                        Button {
+                            Task { await store.sendScenePreset(preset) }
+                        } label: {
+                            VStack(spacing: 4) {
+                                Text(preset.title)
+                                    .lineLimit(1)
+                                Text(preset.mood)
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+                            .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.bordered)
+                    }
+                }
+                Text("第一阶段由 Mac App 渲染 128x64 bitmap，再通过现有 bitmap topic 发送。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
     }
 }
@@ -672,6 +705,24 @@ private struct DevicePanel: View {
                         }
                         .buttonStyle(.bordered)
 
+                        HStack {
+                            Button {
+                                store.copyCurrentDeviceStatus()
+                            } label: {
+                                Label("复制当前状态", systemImage: "doc.on.doc")
+                                    .frame(maxWidth: .infinity)
+                            }
+                            .buttonStyle(.bordered)
+
+                            Button {
+                                Task { await store.exportDiagnostics() }
+                            } label: {
+                                Label("导出诊断包", systemImage: "square.and.arrow.down")
+                                    .frame(maxWidth: .infinity)
+                            }
+                            .buttonStyle(.bordered)
+                        }
+
                         Button(role: .destructive) {
                             Task { await store.rebootDevice() }
                         } label: {
@@ -696,9 +747,25 @@ private struct DevicePanel: View {
                         Text("Mac 重启或换网络后，如果 IP 变化，把这里改成当前 Mac 局域网 IP。")
                             .font(.caption)
                             .foregroundStyle(.secondary)
+                        if !store.currentMacIPHint.isEmpty, store.currentMacIPHint != store.macMqttHost {
+                            Text("检测到当前 Mac IP：\(store.currentMacIPHint)，与 MQTT_HOST 不一致。")
+                                .font(.caption)
+                                .foregroundStyle(.orange)
+                            Button {
+                                store.applyDetectedMacIP(store.currentMacIPHint)
+                            } label: {
+                                Label("使用当前 Mac IP", systemImage: "checkmark.circle")
+                            }
+                            .buttonStyle(.bordered)
+                        }
+                        Toggle("自动下发新的 MQTT_HOST", isOn: $store.autoUpdateMQTTHost)
+                            .toggleStyle(.checkbox)
                     }
                 }
             }
+
+            OTAUpdatePanel(store: store)
+            TestWidgetsPanel(store: store)
 
             GlassPanel {
                 VStack(alignment: .leading, spacing: 14) {
@@ -761,6 +828,88 @@ private struct DevicePanel: View {
     }
 }
 
+private struct OTAUpdatePanel: View {
+    @ObservedObject var store: ConsoleStore
+
+    var body: some View {
+        GlassPanel {
+            VStack(alignment: .leading, spacing: 14) {
+                HStack {
+                    PanelTitle("固件 OTA", systemImage: "arrow.up.doc")
+                    Spacer()
+                    StatusPill(text: store.otaStatus.otaSupported ? "SUPPORTED" : "CHECK", isOn: store.otaStatus.otaSupported)
+                }
+                Text("第一阶段使用 ESP32 HTTP Update API。若当前分区不支持 OTA，会明确返回错误，需要先用 USB 刷入支持 OTA 的分区方案。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 10)], spacing: 10) {
+                    DeviceFact(title: "FW", value: store.otaStatus.fw)
+                    DeviceFact(title: "Free heap", value: "\(store.otaStatus.freeHeap)")
+                    DeviceFact(title: "Sketch", value: "\(store.otaStatus.sketchSize)")
+                    DeviceFact(title: "Free space", value: "\(store.otaStatus.freeSketchSpace)")
+                }
+
+                ProgressView(value: store.otaProgress)
+                    .opacity(store.isOTAWorking || store.otaProgress > 0 ? 1 : 0.35)
+                Text(store.otaMessage)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                HStack {
+                    Button {
+                        Task { await store.queryOTAStatus() }
+                    } label: {
+                        Label("查询 OTA 状态", systemImage: "magnifyingglass")
+                    }
+                    .buttonStyle(.bordered)
+
+                    Button {
+                        store.chooseFirmwareFile()
+                    } label: {
+                        Label(store.otaSelectedFile?.lastPathComponent ?? "选择 .bin", systemImage: "doc")
+                    }
+                    .buttonStyle(.bordered)
+
+                    Button {
+                        Task { await store.uploadFirmwareOTA() }
+                    } label: {
+                        Label("上传固件", systemImage: "arrow.up.circle")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(store.isOTAWorking || store.otaSelectedFile == nil)
+                }
+            }
+        }
+    }
+}
+
+private struct TestWidgetsPanel: View {
+    @ObservedObject var store: ConsoleStore
+
+    var body: some View {
+        GlassPanel {
+            VStack(alignment: .leading, spacing: 12) {
+                PanelTitle("测试表情 / 小组件", systemImage: "face.smiling")
+                HStack {
+                    ForEach(["happy", "focus", "hot", "offline", "thinking"], id: \.self) { mood in
+                        Button(mood) {
+                            Task { await store.sendTestExpression(mood) }
+                        }
+                        .buttonStyle(.bordered)
+                    }
+                }
+                Button {
+                    Task { await store.sendMetricDashboardWidget() }
+                } label: {
+                    Label("发送 Mac 状态 Dashboard", systemImage: "gauge.with.dots.needle.67percent")
+                }
+                .buttonStyle(.borderedProminent)
+            }
+        }
+    }
+}
+
 private struct DeviceStatusPanel: View {
     @ObservedObject var store: ConsoleStore
 
@@ -782,12 +931,21 @@ private struct DeviceStatusPanel: View {
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 135), spacing: 10)], spacing: 10) {
                     DeviceFact(title: "Firmware", value: store.deviceStatus.firmware)
                     DeviceFact(title: "IP", value: store.deviceStatus.ip)
+                    DeviceFact(title: "RSSI", value: store.deviceStatus.rssi)
                     DeviceFact(title: "MQTT", value: store.deviceStatus.mqttConnected)
+                    DeviceFact(title: "MQTT Host", value: store.deviceStatus.mqttHost)
                     DeviceFact(title: "MacLink", value: store.deviceStatus.macLink)
+                    DeviceFact(title: "NetReason", value: store.deviceStatus.networkReason)
                     DeviceFact(title: "Mood", value: store.deviceStatus.mood)
                     DeviceFact(title: "Scene", value: store.deviceStatus.scene)
                     DeviceFact(title: "Screen", value: store.deviceStatus.screenOn)
                     DeviceFact(title: "Fan", value: "\(store.deviceStatus.fanPct)%")
+                    DeviceFact(title: "Uptime", value: store.deviceStatus.uptimeMs)
+                    DeviceFact(title: "Heap", value: store.deviceStatus.heap)
+                    DeviceFact(title: "Config AP", value: store.deviceStatus.configPortal)
+                    DeviceFact(title: "Screen off", value: store.deviceStatus.screenOffReason)
+                    DeviceFact(title: "Mac age", value: store.deviceStatus.lastMacStateAgeMs)
+                    DeviceFact(title: "Temp seen", value: store.deviceStatus.tempSeen)
                 }
 
                 Text("Reason: \(store.deviceStatus.reason)")
@@ -877,7 +1035,7 @@ private struct TelegramRemoteCard: View {
             }
             .buttonStyle(.bordered)
 
-            Text("/show 文字  /ask 问题  /status  /device  /wake")
+            Text("/show 文字  /ask 问题  /status  /device  /wake  /screen_off  /repair")
                 .font(.caption)
                 .foregroundStyle(.secondary)
 

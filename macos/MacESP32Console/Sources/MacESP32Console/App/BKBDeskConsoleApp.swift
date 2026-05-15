@@ -37,6 +37,7 @@ struct MacESP32ConsoleApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @StateObject private var store = ConsoleStore()
     @Environment(\.openWindow) private var openWindow
+    private let menuSymbolName = NSImage(systemSymbolName: "robot", accessibilityDescription: nil) == nil ? "cpu" : "robot"
 
     var body: some Scene {
         WindowGroup("Mac-esp32控制台", id: "main") {
@@ -56,7 +57,7 @@ struct MacESP32ConsoleApp: App {
         MenuBarExtra {
             MenuBarOverview(store: store)
         } label: {
-            Image(systemName: "apple.logo")
+            Image(systemName: menuSymbolName)
                 .symbolRenderingMode(.hierarchical)
         }
     }
@@ -68,7 +69,7 @@ private struct MenuBarOverview: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Label("Mac-esp32 控制台", systemImage: "apple.logo")
+            Label("Mac-ESP32 机器人", systemImage: NSImage(systemSymbolName: "robot", accessibilityDescription: nil) == nil ? "cpu" : "robot")
                 .font(.headline)
 
             Divider()

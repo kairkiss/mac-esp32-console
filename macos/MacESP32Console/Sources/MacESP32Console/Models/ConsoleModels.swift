@@ -87,7 +87,15 @@ struct DeviceStatusSnapshot {
     var firmware: String { petState["fw"] ?? "--" }
     var ip: String { petState["ip"] ?? "--" }
     var rssi: String { petState["rssi"] ?? "--" }
+    var mqttHost: String { petState["mqtt_host"] ?? "--" }
     var mqttConnected: String { petState["mqtt_connected"] ?? "--" }
+    var uptimeMs: String { petState["uptime_ms"] ?? "--" }
+    var heap: String { petState["heap"] ?? petState["free_heap"] ?? "--" }
+    var configPortal: String { petState["config_portal"] ?? "--" }
+    var screenOffReason: String { petState["screen_off_reason"] ?? "--" }
+    var lastMacStateAgeMs: String { petState["last_mac_state_age_ms"] ?? "--" }
+    var tempSeen: String { petState["temp_c_seen"] ?? "--" }
+    var networkReason: String { petState["network_reason"] ?? "--" }
     var macLink: String {
         if let value = petState["mac_link"] { return value }
         if let ageText = petState["last_mac_state_age_ms"], let age = Int(ageText) {
@@ -100,6 +108,26 @@ struct DeviceStatusSnapshot {
     var screenOn: String { petState["screen_on"] ?? "--" }
     var fanPct: String { petState["fan_pct"] ?? "--" }
     var reason: String { petState["mood_reason"] ?? "--" }
+}
+
+struct OTAStatusSnapshot: Decodable {
+    var ok: Bool
+    var fw: String
+    var freeHeap: Int
+    var sketchSize: Int
+    var freeSketchSpace: Int
+    var otaSupported: Bool
+    var reason: String
+
+    enum CodingKeys: String, CodingKey {
+        case ok, fw, reason
+        case freeHeap = "free_heap"
+        case sketchSize = "sketch_size"
+        case freeSketchSpace = "free_sketch_space"
+        case otaSupported = "ota_supported"
+    }
+
+    static let empty = OTAStatusSnapshot(ok: false, fw: "--", freeHeap: 0, sketchSize: 0, freeSketchSpace: 0, otaSupported: false, reason: "not_checked")
 }
 
 struct OLEDBitmap {

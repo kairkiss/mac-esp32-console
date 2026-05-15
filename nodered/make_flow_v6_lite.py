@@ -417,6 +417,19 @@ flow = [
         "wires": [["bkb_controller_v6_lite"]]
     },
     {
+        "id": "bkb_console_status_in_v6_lite",
+        "type": "http in",
+        "z": "bkb_tab_v6_lite",
+        "name": "BKB compatibility status query",
+        "url": "/bkb/console/status",
+        "method": "get",
+        "upload": False,
+        "swaggerDoc": "",
+        "x": 180,
+        "y": 250,
+        "wires": [["bkb_controller_v6_lite"]]
+    },
+    {
         "id": "mac_esp32_console_text_in_v6_lite",
         "type": "http in",
         "z": "bkb_tab_v6_lite",
@@ -730,40 +743,6 @@ flow = [
         "statusVal": "",
         "statusType": "auto",
         "x": 1210,
-        "y": 320,
-        "wires": []
-    },
-    {
-        "id": "bkb_pet_state_in_v6_lite",
-        "type": "mqtt in",
-        "z": "bkb_tab_v6_lite",
-        "name": "ESP32 pet/state",
-        "topic": "bkb/desk1/pet/state",
-        "qos": "0",
-        "datatype": "auto",
-        "broker": "bkb_mqtt_broker_v6_lite",
-        "nl": False,
-        "rap": True,
-        "rh": 0,
-        "inputs": 0,
-        "x": 160,
-        "y": 320,
-        "wires": [["bkb_pet_state_dbg_v6_lite"]]
-    },
-    {
-        "id": "bkb_pet_state_dbg_v6_lite",
-        "type": "debug",
-        "z": "bkb_tab_v6_lite",
-        "name": "ESP32 Pet 状态",
-        "active": True,
-        "tosidebar": True,
-        "console": False,
-        "tostatus": True,
-        "complete": "payload",
-        "targetType": "msg",
-        "statusVal": "payload",
-        "statusType": "auto",
-        "x": 400,
         "y": 320,
         "wires": []
     }
