@@ -23,7 +23,7 @@ It turns the Mac into a live state publisher and the ESP32 into a small physical
 
 中文简介：这是一个本地优先的 Mac 桌面状态屏 / ESP32 桌宠项目。Mac 负责采集状态和处理高级逻辑，Node-RED 负责状态编排与 HTTP API，MQTT 负责通信，ESP32 负责本地表情引擎、OLED 渲染、设备状态与 failsafe。
 
-Current version: `v6.5-diagnostics-setup`
+Current version: `v6.6.0`
 
 ---
 
