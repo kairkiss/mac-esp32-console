@@ -88,7 +88,13 @@ struct DeviceStatusSnapshot {
     var ip: String { petState["ip"] ?? "--" }
     var rssi: String { petState["rssi"] ?? "--" }
     var mqttConnected: String { petState["mqtt_connected"] ?? "--" }
-    var macLink: String { petState["mac_link"] ?? "--" }
+    var macLink: String {
+        if let value = petState["mac_link"] { return value }
+        if let ageText = petState["last_mac_state_age_ms"], let age = Int(ageText) {
+            return age < 10_000 ? "ok" : "stale"
+        }
+        return "--"
+    }
     var mood: String { petState["current_mood"] ?? petState["mood"] ?? "--" }
     var scene: String { petState["current_scene"] ?? petState["scene"] ?? "--" }
     var screenOn: String { petState["screen_on"] ?? "--" }

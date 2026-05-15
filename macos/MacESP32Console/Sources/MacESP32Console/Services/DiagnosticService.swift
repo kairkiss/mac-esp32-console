@@ -10,7 +10,9 @@ struct DiagnosticService {
         async let hammerspoon = checkProcess("Hammerspoon", pattern: "Hammerspoon")
         async let nodeRedProcess = checkProcess("Node-RED process", pattern: "node-red")
         async let brokerPort = checkPort(host: "127.0.0.1", port: 1883)
+        async let configuredBrokerPort = checkConfiguredBrokerPort()
         async let nodeRedHTTP = checkNodeRedHTTP()
+        async let setupPortal = checkSetupPortal()
         async let macScript = checkMacStatusScript()
         async let ips = localIPAddresses()
 
@@ -21,7 +23,9 @@ struct DiagnosticService {
             hammerspoon,
             nodeRedProcess,
             brokerPort,
+            configuredBrokerPort,
             nodeRedHTTP,
+            setupPortal,
             macScript,
             checkConfiguredMQTTHost(await ips),
             checkESP32(deviceStatus)
@@ -81,6 +85,45 @@ struct DiagnosticService {
             return DiagnosticItem(title: "Node-RED HTTP", status: .pass, detail: "\(nodeRedURL)/mac-esp32/console/status 正常", fix: "")
         } catch {
             return DiagnosticItem(title: "Node-RED HTTP", status: .fail, detail: error.localizedDescription, fix: "确认 Node-RED 已启动，并部署 v6.5 flow。")
+        }
+    }
+
+    private func checkConfiguredBrokerPort() async -> DiagnosticItem {
+        let host = UserDefaults.standard.string(forKey: "macMqttHost") ?? "192.168.1.100"
+        let port = UserDefaults.standard.object(forKey: "mqttPort") as? Int ?? 1883
+        let result = await runCommand("/usr/bin/nc", arguments: ["-z", "-G", "2", host, String(port)])
+        if result.exitCode == 0 {
+            return DiagnosticItem(title: "MQTT LAN endpoint", status: .pass, detail: "\(host):\(port) 可连接", fix: "")
+        }
+        return DiagnosticItem(
+            title: "MQTT LAN endpoint",
+            status: .fail,
+            detail: "\(host):\(port) 不可连接",
+            fix: "ESP32 必须访问 Mac 的局域网 IP。确认 Mac IP、Mosquitto 监听 0.0.0.0:1883，且 Mac 防火墙未阻挡。"
+        )
+    }
+
+    private func checkSetupPortal() async -> DiagnosticItem {
+        let root = UserDefaults.standard.string(forKey: "configPortalURL") ?? "http://192.168.4.1"
+        guard let url = URL(string: root.trimmingCharacters(in: CharacterSet(charactersIn: "/")) + "/status") else {
+            return DiagnosticItem(title: "ESP32 setup portal", status: .warn, detail: "配置热点 URL 无效", fix: "默认应为 http://192.168.4.1")
+        }
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 2.5
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+                throw URLError(.badServerResponse)
+            }
+            let text = String(data: data, encoding: .utf8) ?? "OK"
+            return DiagnosticItem(title: "ESP32 setup portal", status: .pass, detail: text.prefixText(120), fix: "")
+        } catch {
+            return DiagnosticItem(
+                title: "ESP32 setup portal",
+                status: .warn,
+                detail: "当前不可访问：\(error.localizedDescription)",
+                fix: "只有 Mac 连接到 MacESP32-Setup 热点，或 ESP32 AP+STA 正常开启时才可访问。"
+            )
         }
     }
 
@@ -149,4 +192,11 @@ private struct CommandResult {
     var exitCode: Int32
     var stdout: String
     var stderr: String
+}
+
+private extension StringProtocol {
+    func prefixText(_ length: Int) -> String {
+        let result = String(prefix(length))
+        return count > length ? result + "..." : result
+    }
 }

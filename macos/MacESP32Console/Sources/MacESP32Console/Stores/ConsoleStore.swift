@@ -34,6 +34,7 @@ final class ConsoleStore: ObservableObject {
     @Published var isDeviceStatusRefreshing = false
     @Published var diagnosticReport = DiagnosticReport()
     @Published var isDiagnosticsRunning = false
+    @Published var isRepairingConnection = false
     @Published var setupWizardPresented = false
     @Published var setupCompleted = false { didSet { savePreference(setupCompleted, for: "setupCompleted") } }
     @Published var displayQueue: [DisplayQueueItem] = []
@@ -53,6 +54,7 @@ final class ConsoleStore: ObservableObject {
     private var displayQueueTask: Task<Void, Never>?
     private var lastStreamSend = Date.distantPast
     private var isRestoringPreferences = true
+    private var isStartingTelegram = false
 
     init() {
         let defaults = UserDefaults.standard
@@ -186,6 +188,35 @@ final class ConsoleStore: ObservableObject {
         log("Diagnostics complete: \(diagnosticReport.summary)")
     }
 
+    func repairConnection() async {
+        guard !isRepairingConnection else { return }
+        isRepairingConnection = true
+        defer { isRepairingConnection = false }
+
+        log("Connection repair started")
+        await refreshDeviceStatus()
+        diagnosticReport = await DiagnosticService(nodeRedURL: nodeRedURL).run(deviceStatus: deviceStatus)
+
+        let preferredIP = diagnosticReport.macIPs.first { !$0.hasPrefix("192.168.4.") } ?? diagnosticReport.macIPs.first
+        if let preferredIP, macMqttHost != preferredIP {
+            macMqttHost = preferredIP
+            log("Mac MQTT IP updated to \(preferredIP)")
+        }
+
+        if deviceStatus.online {
+            log("ESP32 is online; refreshing network config through MQTT")
+            await applyNetworkConfigOnline()
+        } else {
+            log("ESP32 is offline; trying setup portal at \(configPortalURL)")
+            await applyNetworkConfigDirect()
+        }
+
+        try? await Task.sleep(nanoseconds: 8_000_000_000)
+        await refreshDeviceStatus()
+        diagnosticReport = await DiagnosticService(nodeRedURL: nodeRedURL).run(deviceStatus: deviceStatus)
+        log("Connection repair finished: \(diagnosticReport.summary)")
+    }
+
     func applyDetectedMacIP(_ ip: String) {
         macMqttHost = ip
         log("Mac MQTT IP set to \(ip)")
@@ -215,10 +246,16 @@ final class ConsoleStore: ObservableObject {
             telegramLog("Token is empty")
             return
         }
+        guard telegramTask == nil, !isStartingTelegram else {
+            telegramLog("Telegram polling is already running")
+            return
+        }
 
+        isStartingTelegram = true
         isTelegramRunning = true
         telegramLog("Telegram polling started")
         telegramTask = Task { [weak self] in
+            await MainActor.run { self?.isStartingTelegram = false }
             await self?.pollTelegram(token: token)
         }
     }
@@ -438,12 +475,33 @@ final class ConsoleStore: ObservableObject {
 
     private func pollTelegram(token: String) async {
         let client = TelegramClient(token: token)
-        var offset: Int?
+        var offset = UserDefaults.standard.object(forKey: "telegramLastUpdateId") as? Int
+        if let saved = offset {
+            offset = saved + 1
+            telegramLog("Telegram resume from update_id \(saved)")
+        } else {
+            do {
+                let pending = try await client.getUpdates(offset: nil)
+                if let latest = pending.map(\.updateId).max() {
+                    UserDefaults.standard.set(latest, forKey: "telegramLastUpdateId")
+                    offset = latest + 1
+                    telegramLog("Telegram skipped \(pending.count) old update(s)")
+                }
+            } catch {
+                telegramLog("Telegram initial sync failed: \(error.localizedDescription)")
+            }
+        }
+        defer {
+            telegramTask = nil
+            isTelegramRunning = false
+            isStartingTelegram = false
+        }
         while !Task.isCancelled {
             do {
                 let updates = try await client.getUpdates(offset: offset)
                 for update in updates {
                     offset = update.updateId + 1
+                    UserDefaults.standard.set(update.updateId, forKey: "telegramLastUpdateId")
                     guard let message = update.message, let text = message.text else { continue }
                     await handleTelegram(text: text, chatId: message.chat.id, client: client)
                 }

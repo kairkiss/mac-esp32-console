@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct ContentView: View {
-    @StateObject private var store = ConsoleStore()
+    @ObservedObject var store: ConsoleStore
 
     var body: some View {
         NavigationSplitView {
@@ -162,6 +162,28 @@ private struct DiagnosticsPanel: View {
                         Label("打开向导", systemImage: "arrow.up.forward.app")
                     }
                     .buttonStyle(.bordered)
+                }
+            }
+
+            GlassPanel {
+                HStack(alignment: .center, spacing: 16) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        PanelTitle("一键连接恢复", systemImage: "arrow.triangle.2.circlepath")
+                        Text("自动检查 Mac IP、Node-RED、Mosquitto、ESP32 在线状态，并按当前配置刷新 MQTT/配网参数。")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Button {
+                        Task { await store.repairConnection() }
+                    } label: {
+                        if store.isRepairingConnection {
+                            ProgressView().controlSize(.small)
+                        }
+                        Label("修复连接", systemImage: "wrench.and.screwdriver")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(store.isRepairingConnection)
                 }
             }
 
@@ -719,6 +741,18 @@ private struct DevicePanel: View {
                         .buttonStyle(.bordered)
                     }
                     .disabled(store.isDeviceBusy)
+
+                    Button {
+                        Task { await store.repairConnection() }
+                    } label: {
+                        if store.isRepairingConnection {
+                            ProgressView().controlSize(.small)
+                        }
+                        Label("一键修复连接", systemImage: "arrow.triangle.2.circlepath")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(store.isRepairingConnection || store.isDeviceBusy)
                 }
             }
 

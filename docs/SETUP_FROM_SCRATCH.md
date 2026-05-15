@@ -179,6 +179,8 @@ http://127.0.0.1:1880
 
 也可以随时打开 `诊断与向导` 板块重新检查系统。
 
+v6.6 起，App 顶部菜单栏会出现一个小 Apple 图标。点击后可以打开主控制台、运行诊断、执行一键连接恢复、启动或停止 Telegram。
+
 ## 9. DeepSeek
 
 在 App 中填入 DeepSeek API Key。
@@ -208,6 +210,18 @@ ESP32 没上线：
 - 检查 `MQTT_HOST` 是否是 Mac 局域网 IP，不能是 `127.0.0.1`。
 - 检查 Mosquitto 是否在 1883。
 - 检查 Mac 和 ESP32 是否在同一网络。
+- 优先在 App 的 `诊断与向导` 或菜单栏中点击 `修复连接`。
+
+Mac 休眠后 ESP32 显示 offline：
+
+- 打开 App 菜单栏 Apple 图标。
+- 点击 `修复连接`。
+- 如果仍离线，连接 `MacESP32-Setup` 热点，再用 App 的 `通过配置热点写入` 更新 Wi-Fi/MQTT。
+
+Telegram 重复回复：
+
+- v6.6 已加入单实例锁和 Telegram `update_id` 持久化。
+- 如果仍出现重复，先确认系统中只有一个 `MacESP32Console` 进程。
 
 OLED 没显示中文：
 
