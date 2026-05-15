@@ -1,105 +1,180 @@
-# Mac-esp32 控制台
+# Mac-ESP32 Console
 
-Mac-esp32 控制台是一套 Mac + Node-RED + MQTT + ESP32 + OLED 的桌面状态屏/桌宠系统。
+<p align="center">
+  <strong>A local ambient console for macOS, ESP32 and OLED.</strong><br>
+  <span>一个把 Mac 状态、AI 回复、桌面自动化与 ESP32 OLED 小屏连接起来的桌面控制台 / 桌宠系统。</span>
+</p>
 
-当前版本：`v6.5-diagnostics-setup`
+<p align="center">
+  <img alt="macOS" src="https://img.shields.io/badge/macOS-SwiftUI-black?logo=apple">
+  <img alt="ESP32" src="https://img.shields.io/badge/ESP32-Arduino-red?logo=espressif">
+  <img alt="Node-RED" src="https://img.shields.io/badge/Node--RED-Automation-red?logo=nodered">
+  <img alt="MQTT" src="https://img.shields.io/badge/MQTT-Mosquitto-blue">
+  <img alt="OLED" src="https://img.shields.io/badge/OLED-128x64-lightgrey">
+</p>
 
-它把 Mac 作为状态发布端，把 ESP32 作为本地 Pet Runtime：
+---
 
-- Mac 采集 CPU、内存、温度、idle、前台 App、锁屏状态。
-- Hammerspoon 把锁屏/解锁/App 切换事件发给 Node-RED。
-- Node-RED 发布统一 `mac/state`、heartbeat、配置和控制命令。
-- ESP32 本地运行 FaceEngine、SceneEngine、OLED 渲染、MacLink、failsafe。
-- macOS SwiftUI App 负责中文 bitmap 预览、DeepSeek 流式上屏、Telegram 远程控制、设备状态页和配网。
+## Overview / 项目概览
 
-## 功能
+**Mac-ESP32 Console** is a local-first desktop companion system built with **macOS + Node-RED + MQTT + ESP32 + OLED**.
 
-- 128x64 SSD1309 单色 OLED 表情桌宠。
-- ESP32 本地表情引擎：
-  - happy / focus / busy / power / hot / idle / sleepy / sleep / offline / thinking / reading / replying。
-- 中文显示：
-  - macOS App 把中文渲染为 128x64 1bpp bitmap。
-  - 支持多页消息，每页至少 6 秒。
-- DeepSeek：
-  - API Key 只保存在本机 Keychain。
-  - 回复短句化，并自动流式显示到 OLED。
-- Telegram：
-  - Bot Token 只保存在本机 Keychain。
-  - 支持 chat_id 白名单。
-  - 支持 `/show`、`/ask`、`/status`、`/device`、`/wake`。
-- 设备管理：
-  - App 显示 ESP32 online、fw、IP、RSSI、MQTT、MacLink、mood、scene、screen_on、fan_pct。
-  - 支持软唤醒、熄屏、回到表情、测试图、重启 ESP32、开启配网热点。
-- 诊断与向导：
-  - 首次启动配置向导。
-  - App 内检查 Mosquitto、Node-RED、Hammerspoon、Mac 状态脚本、ESP32 在线状态。
-  - 自动检测 Mac 局域网 IP，并可一键填入 MQTT_HOST。
-- 风扇控制：
-  - 固件保留 GPIO25 PWM 风扇控制逻辑。
-  - 本仓库不包含真实风扇硬件测试。
+It turns the Mac into a live state publisher and the ESP32 into a small physical runtime. macOS collects system signals, Node-RED coordinates state and commands, MQTT carries messages, and the ESP32 renders faces, scenes, status pages and bitmap text on a 128x64 OLED display.
 
-## 硬件
+中文简介：这是一个本地优先的 Mac 桌面状态屏 / ESP32 桌宠项目。Mac 负责采集状态和处理高级逻辑，Node-RED 负责状态编排与 HTTP API，MQTT 负责通信，ESP32 负责本地表情引擎、OLED 渲染、设备状态与 failsafe。
 
-已验证的 OLED 配置：
+Current version: `v6.5-diagnostics-setup`
 
-- ESP32 Dev Module
-- SSD1309 128x64 OLED
-- U8g2 构造：`U8G2_SSD1309_128X64_NONAME0_F_4W_HW_SPI`
-- OLED CS: GPIO33
-- OLED DC: GPIO27
-- OLED RST: GPIO26
-- Fan PWM: GPIO25
+---
 
-风扇安全要求：
+## Core Features / 核心功能
 
-- ESP32 GPIO 不能直接驱动 5V 风扇。
-- 必须使用 MOSFET 或三极管驱动。
-- 风扇使用外部 5V 电源。
-- ESP32 GND 与 5V 电源 GND 必须共地。
+### Mac-aware OLED companion
 
-## 仓库结构
+The OLED display reacts to Mac activity such as CPU usage, memory usage, temperature, idle time, foreground app and lock state.
+
+The ESP32 expression engine supports moods including:
+
+```text
+happy / focus / busy / power / hot / idle / sleepy / sleep / offline / thinking / reading / replying
+```
+
+### Local ESP32 runtime
+
+The firmware runs the essential device logic locally:
+
+- FaceEngine and SceneEngine
+- OLED rendering
+- MacLink state handling
+- MQTT command handling
+- offline / failsafe behavior
+- optional GPIO25 PWM fan-control logic
+
+### Chinese bitmap display
+
+The macOS app renders Chinese text into `128x64` 1-bit bitmap pages, then sends those pages to ESP32 through Node-RED and MQTT. This makes Chinese short messages, status prompts and AI replies readable on a small OLED screen.
+
+### macOS SwiftUI console
+
+The SwiftUI app in `macos/MacESP32Console` provides:
+
+- Chinese bitmap preview and sending
+- DeepSeek short-response streaming to OLED
+- Telegram bridge
+- ESP32 online state, firmware version, IP and RSSI
+- MQTT / MacLink state
+- current mood, scene, screen state and fan percentage
+- soft wake, screen off, return-to-face, test image and ESP32 restart
+- setup assistant and diagnostics
+
+### Diagnostics
+
+v6.5 includes an in-app diagnostics page and a terminal doctor script:
+
+```sh
+./tools/doctor_v6_5.sh
+```
+
+It checks Mosquitto, Node-RED, Hammerspoon, Mac telemetry script, console endpoints, ESP32 status and local network IP candidates.
+
+---
+
+## Architecture / 系统架构
+
+```text
+Mac telemetry + Hammerspoon events
+        ↓
+Node-RED state orchestration and HTTP API
+        ↓
+Mosquitto MQTT broker
+        ↓
+ESP32 local runtime
+        ↓
+OLED face / scene / Chinese bitmap / device feedback
+```
+
+Main roles:
+
+| Layer | Role |
+|---|---|
+| macOS script | Collects CPU, memory, temperature, idle and system status |
+| Hammerspoon | Sends lock, unlock and foreground-app events |
+| Node-RED | Coordinates state, HTTP endpoints and MQTT publishing |
+| Mosquitto | Local MQTT broker |
+| ESP32 | Runs the Pet Runtime and OLED rendering |
+| SwiftUI App | Provides control panel, bitmap rendering, AI display and diagnostics |
+
+---
+
+## Hardware / 硬件配置
+
+Verified OLED setup:
+
+| Part | Value |
+|---|---|
+| MCU | ESP32 Dev Module |
+| Display | SSD1309 128x64 monochrome OLED |
+| U8g2 constructor | `U8G2_SSD1309_128X64_NONAME0_F_4W_HW_SPI` |
+| OLED CS | GPIO33 |
+| OLED DC | GPIO27 |
+| OLED RST | GPIO26 |
+| Fan PWM | GPIO25 |
+
+Fan note:
+
+ESP32 GPIO pins must not drive a 5V fan directly. Use a MOSFET or transistor driver, power the fan from an external 5V supply, and connect ESP32 GND with the external supply GND.
+
+中文说明：如果接风扇，不能把风扇直接接到 ESP32 GPIO。必须使用 MOSFET / 三极管驱动，外部 5V 供电，并且 ESP32 与外部电源共地。
+
+---
+
+## Repository Layout / 仓库结构
 
 ```text
 esp32/
-  bkb_desk_pet_v6_lite/          ESP32 Arduino 固件
-  v5_original/                   v5 参考/回滚源码，已脱敏
+  bkb_desk_pet_v6_lite/          ESP32 Arduino firmware
+  v5_original/                   Sanitized v5 reference / rollback source
+
 mac/
-  macbrain_status_v6.sh          Mac 状态采集脚本
+  macbrain_status_v6.sh          Mac telemetry script
+
 nodered/
-  make_flow_v6_lite.py           Node-RED flow 生成器
-  bkb_desk_pet_v6_lite_flow.json 生成后的 flow
+  make_flow_v6_lite.py           Node-RED flow generator
+  bkb_desk_pet_v6_lite_flow.json Generated Node-RED flow
+
 hammerspoon/
   hammerspoon_bkb_bridge_v6_lite.lua
+
 macos/
-  MacESP32Console/               SwiftUI macOS 控制台 App
+  MacESP32Console/               SwiftUI macOS control console
+
 tools/
-  deploy_v6_lite.sh
-  rollback_v5.sh
-  test_v6_lite.sh
+  deploy_v6_lite.sh              Deploy Mac runtime
+  rollback_v5.sh                 Roll back to v5
+  test_v6_lite.sh                Test MQTT / state flow
+  doctor_v6_5.sh                 v6.5 diagnostics
+  package_app_v6_5.sh            Package macOS app
+
 docs/
-  详细架构、部署、回滚、控制台、表达引擎文档
+  Architecture, deployment, rollback, console and expression-engine docs
 ```
 
-> 说明：内部 MQTT topic 仍保留 `bkb/desk1/...`，这是为了兼容 v5/v6 retained payload 和已部署固件。App 对外显示名称已改为 Mac-esp32 控制台。
+Compatibility note: internal MQTT topics still use `bkb/desk1/...` for compatibility with v5 / v6 retained payloads and deployed firmware. The public-facing product name is **Mac-ESP32 Console** / **Mac-esp32 控制台**.
 
-## 快速部署
+---
 
-详细步骤见 [docs/DEPLOY_V6_LITE.md](docs/DEPLOY_V6_LITE.md)。
+## Quick Start / 快速开始
 
-最小部署顺序：
+Full guide: [`docs/DEPLOY_V6_LITE.md`](docs/DEPLOY_V6_LITE.md)
 
-1. 安装并启动 Mosquitto。
-2. 安装并启动 Node-RED。
-3. 部署 `nodered/bkb_desk_pet_v6_lite_flow.json` 到 `~/.node-red/flows.json`。
-4. 部署 `mac/macbrain_status_v6.sh` 到 `~/bin/macbrain_status_v6.sh`，并 `chmod +x`。
-5. 部署 Hammerspoon bridge 到 `~/.hammerspoon/init.lua`。
-6. 用 Arduino CLI 编译并烧录 ESP32。
-7. 运行 macOS App。
-8. 在 App 的 `诊断与向导` 中运行检查。
+### 1. Clone
 
-## ESP32 编译
+```sh
+git clone https://github.com/kairkiss/mac-esp32-console.git
+cd mac-esp32-console
+```
 
-安装 core 和库：
+### 2. Install ESP32 dependencies
 
 ```sh
 arduino-cli core update-index
@@ -109,35 +184,30 @@ arduino-cli lib install ArduinoJson
 arduino-cli lib install U8g2
 ```
 
-编译：
+### 3. Deploy Mac runtime
+
+```sh
+./tools/deploy_v6_lite.sh
+```
+
+The script deploys:
+
+```text
+~/bin/macbrain_status_v6.sh
+~/.hammerspoon/init.lua
+~/.node-red/flows.json
+```
+
+### 4. Build and upload ESP32 firmware
 
 ```sh
 arduino-cli compile --fqbn esp32:esp32:esp32 esp32/bkb_desk_pet_v6_lite
-```
-
-烧录：
-
-```sh
 arduino-cli upload -p /dev/cu.usbserial-0001 --fqbn esp32:esp32:esp32 esp32/bkb_desk_pet_v6_lite
 ```
 
-首次使用请在固件中修改：
+Replace `/dev/cu.usbserial-0001` with your actual serial port.
 
-```cpp
-const char* WIFI_SSID = "YOUR_WIFI_SSID";
-const char* WIFI_PASS = "YOUR_WIFI_PASSWORD";
-const char* MQTT_HOST = "192.168.1.100";
-```
-
-也可以使用 ESP32 配网热点：
-
-- AP: `MacESP32-Setup`
-- Password: `macesp32`
-- Portal: `http://192.168.4.1`
-
-## macOS App
-
-源码：
+### 5. Run the macOS app
 
 ```sh
 cd macos/MacESP32Console
@@ -145,87 +215,72 @@ swift build
 swift run MacESP32Console
 ```
 
-App 不会把 DeepSeek API Key、Telegram Token、Wi-Fi 密码写进仓库：
-
-- DeepSeek API Key: macOS Keychain
-- Telegram Bot Token: macOS Keychain
-- Wi-Fi Password: macOS Keychain
-- 普通偏好：UserDefaults
-
-## 诊断
-
-App 内置 `诊断与向导` 板块。也可以在终端运行：
+### 6. Run diagnostics
 
 ```sh
 ./tools/doctor_v6_5.sh
 ```
 
-它会检查本机服务、Node-RED endpoint、Mac 状态脚本、ESP32 在线状态和 Mac MQTT IP。
+---
 
 ## Node-RED HTTP API
 
-App 使用这些 endpoint：
+| Method | Endpoint | Purpose |
+|---|---|---|
+| GET | `/mac-esp32/console/status` | Read console status |
+| POST | `/mac-esp32/console/bitmap` | Send one bitmap frame |
+| POST | `/mac-esp32/console/bitmap/page` | Send paged bitmap content |
+| POST | `/mac-esp32/console/scene` | Switch scene |
+| POST | `/mac-esp32/console/device` | Device control |
+| POST | `/mac-esp32/console/netconfig` | Network configuration |
+| POST | `/bkb/mac/event` | Hammerspoon event bridge |
 
-- `GET /mac-esp32/console/status`
-- `POST /mac-esp32/console/bitmap`
-- `POST /mac-esp32/console/bitmap/page`
-- `POST /mac-esp32/console/scene`
-- `POST /mac-esp32/console/device`
-- `POST /mac-esp32/console/netconfig`
+---
 
-Hammerspoon 使用：
+## MQTT Topics
 
-- `POST /bkb/mac/event`
+Primary topics:
 
-## MQTT Topic
-
-主路径：
-
-- `bkb/desk1/mac/state`
-- `bkb/desk1/mac/heartbeat`
-- `bkb/desk1/pet/config`
-- `bkb/desk1/pet/state`
-- `bkb/desk1/pet/telemetry`
-- `bkb/desk1/cmd/text`
-- `bkb/desk1/cmd/bitmap`
-- `bkb/desk1/cmd/bitmap/page`
-- `bkb/desk1/cmd/scene`
-- `bkb/desk1/cmd/device`
-- `bkb/desk1/cmd/netconfig`
-
-兼容层：
-
-- `bkb/desk1/desired/system`
-- `bkb/desk1/desired/face`
-- `bkb/desk1/desired/display`
-
-## 安全说明
-
-仓库不应包含：
-
-- DeepSeek API Key
-- Telegram Bot Token
-- Wi-Fi 密码
-- 私有 retained MQTT payload dump
-- live Node-RED 备份
-- macOS Keychain / UserDefaults 数据
-
-上传前可运行：
-
-```sh
-rg -n --hidden --glob '!.git/**' --glob '!backups/**' '(api[_-]?key|token|password|secret|Bearer|WIFI_PASS)'
+```text
+bkb/desk1/mac/state
+bkb/desk1/mac/heartbeat
+bkb/desk1/pet/config
+bkb/desk1/pet/state
+bkb/desk1/pet/telemetry
+bkb/desk1/cmd/text
+bkb/desk1/cmd/bitmap
+bkb/desk1/cmd/bitmap/page
+bkb/desk1/cmd/scene
+bkb/desk1/cmd/device
+bkb/desk1/cmd/netconfig
 ```
 
-匹配到源码变量名是正常的；匹配到真实密钥或密码必须先删除。
+Compatibility topics:
+
+```text
+bkb/desk1/desired/system
+bkb/desk1/desired/face
+bkb/desk1/desired/display
+```
+
+---
+
+## Local-first Notes / 本地优先说明
+
+This project is designed to run mainly on your own Mac and local network. Keep local runtime data, personal backups, exported flows with personal values, retained MQTT dumps and local preference files out of public commits.
+
+---
 
 ## Release
 
-本仓库的 GitHub Release 包含：
+A release may include source tag, release notes and a packaged macOS app zip if locally buildable.
 
-- 源码 tag
-- release notes
-- macOS App zip，如本地可构建
+```sh
+./tools/package_app_v6_5.sh
+```
 
-## 许可证
+---
 
-当前未指定开源许可证。公开仓库默认保留版权；如果要允许他人复用，请后续添加明确 LICENSE。
+## License / 许可证
+
+No open-source license has been specified yet. Without a `LICENSE` file, this public repository remains copyrighted by default. If you want others to use, modify or redistribute this project, add an explicit license such as MIT, Apache-2.0 or GPL.
